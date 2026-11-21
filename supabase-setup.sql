@@ -1,5 +1,5 @@
 -- =====================================================================
--- سهلي فزيو — Sahli Physio · إعداد Supabase (قاعدة بيانات حية + Realtime)
+-- سهّلي فيزيو — Sahli Physio · إعداد Supabase (قاعدة بيانات حية + Realtime)
 -- نفّذ الملف ده مرة واحدة فقط:
 -- Supabase Dashboard → SQL Editor → New query → الصق الكل → Run
 -- =====================================================================
@@ -505,3 +505,48 @@ create policy "admin write" on public.summaries
 
 grant select on public.recordings, public.summaries to anon, authenticated;
 grant insert, update, delete on public.recordings, public.summaries to authenticated;
+
+-- ---------- 15) إصلاح: أعمدة الشرح الاختيارية NOT NULL في الجداول الحية ----------
+-- جداول المحتوى الأصلية (videos/files/questions) اتعملت سنة الإنشاء
+-- الأولى بعمود description ‏NOT NULL، فأي إضافة من صفحة الأدمن من غير
+-- «شرح / ملاحظة» كانت بتفشل برسالة:
+--   null value in column "description" of relation "videos"
+--   violates not-null constraint
+-- القسم ده بيصلّح المخطط الحي نفسه: بيشيل NOT NULL من كل الأعمدة
+-- النصية الاختيارية في جداول المحتوى الخمسة ويديها قيمة افتراضية ''،
+-- فالحفظ ينجح سواء الشرح اتكتب أو اتساب فاضي — حتى من أي نسخة قديمة
+-- لسه مفتوحة عند أدمن. (النسخة الستاتيك الحالية كمان بقت تبعت ''
+-- بدل null في rowForDb، فالقسم ده طبقة أمان إضافية على مستوى القاعدة.)
+-- آمن للتشغيل المتكرر: DROP NOT NULL على عمود اختياري أصلًا ما بيعملش
+-- حاجة، وSET DEFAULT بيثبّت نفس القيمة. نفّذه مرة واحدة في SQL Editor.
+alter table public.videos     alter column description drop not null;
+alter table public.videos     alter column description set default '';
+alter table public.files      alter column description drop not null;
+alter table public.files      alter column description set default '';
+alter table public.files      alter column file_type   drop not null;
+alter table public.questions  alter column description drop not null;
+alter table public.questions  alter column description set default '';
+alter table public.questions  alter column topic       drop not null;
+alter table public.questions  alter column image_url   drop not null;
+alter table public.recordings alter column description drop not null;
+alter table public.recordings alter column description set default '';
+alter table public.summaries  alter column description drop not null;
+alter table public.summaries  alter column description set default '';
+alter table public.summaries  alter column file_type   drop not null;
+
+-- ---------- 16) رفع محتوى يدوي من الزوار في «شارك وساعد» (Storage) ----------
+-- الزائر يقدر يرفع المحتوى من جهازه بدل ما يلصق لينك بس: الملف بيترفع
+-- على نفس باكت sahli-files (قسم 13) لكن في مجلد «suggestions/» بس،
+-- ولينكه العام بيتحط في اقتراحه اللي بيروح للأدمن للمراجعة. السياسة
+-- دي بتسمح لدور anon (الزوار من غير أي تسجيل دخول) بالإدراج في
+-- المجلد ده فقط — مفيش رفع بره المجلد، ومفيش تعديل ولا حذف للزوار،
+-- والقراءة العامة موجودة أصلًا من سياسة قسم 13. الأدمن يقدر يحذف
+-- أي ملف مرفوع بسياسات قسم 13 (delete للأدمن المسجّل على الباكت كله).
+-- نفّذ القسم ده مرة واحدة في SQL Editor على المشروع الحي.
+drop policy if exists "visitor insert suggestion uploads" on storage.objects;
+create policy "visitor insert suggestion uploads" on storage.objects
+  for insert to anon
+  with check (
+    bucket_id = 'sahli-files'
+    and (storage.foldername(name))[1] = 'suggestions'
+  );
