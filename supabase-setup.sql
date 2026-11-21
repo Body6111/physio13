@@ -366,3 +366,142 @@ grant delete on public.anon_replies to authenticated;
 
 alter table public.anon_replies replica identity full;
 alter publication supabase_realtime add table public.anon_replies;
+
+-- ---------- 11) تغيير باسورد صفحة الإدارة من جوه الصفحة نفسها ----------
+-- الباسورد الحالي معرّف كنص جوه دالة check_owner_code في قسم 6.
+-- الدالة دي بتتحقق من الباسورد الحالي الأول، وبعدين بتعيد تعريف
+-- check_owner_code بالباسورد الجديد — فالتغيير بيتم على السيرفر،
+-- والباسورد الجديد مش بيتحفظ في أي ملف موقع ولا في الريبو.
+-- ملحوظات مهمة:
+--  * شغّل القسم ده بعد ما تظبط قسم 6 (النص اللي مكان <OWNER_CODE>
+--    تحت لازم يبقى الباسورد الحالي وقت التشغيل).
+--  * لو غيّرت الباسورد من الصفحة نفسها بعد كده، حدّث النص اللي مكان
+--    <OWNER_CODE> هنا قبل أي تشغيل تاني للقسم ده — إعادة التشغيل
+--    بترجّع المقارنة للباسورد المكتوب هنا.
+--  * الباسورد لو اتنسى خالص لا يمكن استرجاعه (مفيش نسخة نصية منه
+--    بره الدالة) — الحل الوحيد وقتها تعديل قسم 6 يدويًا من هنا.
+create or replace function public.change_owner_code(current_code text, new_code text)
+returns boolean language plpgsql security definer set search_path = public
+as $$
+begin
+  if new_code is null or length(new_code) < 4 or length(new_code) > 64 then
+    return false;
+  end if;
+  if current_code is distinct from '<OWNER_CODE>' then
+    return false;
+  end if;
+  execute format(
+    'create or replace function public.check_owner_code(candidate text) returns boolean language sql security definer set search_path = public as $fn$ select candidate = %L $fn$',
+    new_code
+  );
+  return true;
+end $$;
+
+grant execute on function public.change_owner_code(text, text) to anon, authenticated;
+
+-- ---------- 12) تسجيل دخول الأدمن التلقائي في النسخة الستاتيك ----------
+-- المشكلة اللي بيحلها القسم ده: صفحة الأدمن في النسخة الستاتيك كانت
+-- بتتحقق من الكود عبر check_admin_code (قسم 6) وبتفتح للعرض بس، لكن
+-- الكتابة في الجداول مقفولة بسياسات RLS على دور authenticated،
+-- والصفحة مكانتش بتعمل أي جلسة Supabase Auth — فأي إضافة/حذف كان
+-- بيفشل («سجّل دخول الأدمن الأول»).
+-- الحل: باسورد حساب الأدمن المشترك في Supabase Auth بتتظبط على نفس
+-- قيمة كود الأدمن، وبعد ما الصفحة تتحقق من الكود بترجع إيميل الحساب
+-- من الدالة اللي تحت (بترجّعه بس لو الكود المبعوت صح) وبتعمل
+-- signInWithPassword بالإيميل + الكود اللي الأدمن كتبه — فالدخول
+-- والكتابة بيشتغلوا بالكود بس، من غير إيميل أو باسورد في أي ملف.
+-- قبل التشغيل: بدّل <ADMIN_CODE> بنفس كود الأدمن اللي حطيته في
+-- قسم 6، و<ADMIN_EMAIL> بإيميل حساب الأدمن المشترك في Supabase Auth.
+create or replace function public.admin_signin_email(candidate text)
+returns text language sql security definer set search_path = public
+as $$ select case when candidate = '<ADMIN_CODE>' then '<ADMIN_EMAIL>' else null end $$;
+
+grant execute on function public.admin_signin_email(text) to anon, authenticated;
+
+-- مزامنة باسورد حساب الأدمن المشترك مع كود الأدمن (بتتشغّل مرة
+-- واحدة، وتتعاد لو كود الأدمن اتغيّر — مع تحديث قسم 6 والدالة
+-- اللي فوق بنفس القيمة الجديدة).
+update auth.users
+set encrypted_password = extensions.crypt('<ADMIN_CODE>', extensions.gen_salt('bf')),
+    updated_at = now()
+where email = '<ADMIN_EMAIL>';
+
+-- ---------- 13) تخزين الملفات المرفوعة من صفحة الأدمن (Storage) ----------
+-- باكت عام للقراءة: الأدمن يرفع ملف من جهازه من صفحة الأدمن (PDF أو
+-- Word أو PowerPoint أو صور أو أي ملف، وصور الأسئلة كمان) فيترفع هنا،
+-- واللينك العام اللي بيرجع بيتسجل كلينك المحتوى — الطلبة بيفتحوا
+-- الملفات باللينك العام من غير أي دخول. الرفع والتعديل والحذف
+-- للأدمن المسجّل بس (نفس جلسة Supabase Auth اللي بتتعمل تلقائيًا
+-- بعد إدخال الكود — قسم 12)، فالرفع بيشتغل بالكود بس.
+insert into storage.buckets (id, name, public)
+values ('sahli-files', 'sahli-files', true)
+on conflict (id) do nothing;
+
+drop policy if exists "public read uploads" on storage.objects;
+create policy "public read uploads" on storage.objects
+  for select to anon, authenticated using (bucket_id = 'sahli-files');
+
+drop policy if exists "admin insert uploads" on storage.objects;
+create policy "admin insert uploads" on storage.objects
+  for insert to authenticated with check (bucket_id = 'sahli-files');
+
+drop policy if exists "admin update uploads" on storage.objects;
+create policy "admin update uploads" on storage.objects
+  for update to authenticated using (bucket_id = 'sahli-files') with check (bucket_id = 'sahli-files');
+
+drop policy if exists "admin delete uploads" on storage.objects;
+create policy "admin delete uploads" on storage.objects
+  for delete to authenticated using (bucket_id = 'sahli-files');
+
+-- ---------- 14) جداول الريكوردات والملخصات ----------
+-- قسمان جديدان في كل مادة: «ريكوردات» (تسجيلات صوتية) و«ملخصات»،
+-- وكل واحد فيهم متقسم زي الملفات بالظبط: محاضرات (نظري) وسكاشن
+-- (عملي) عبر file_category — فالعملي ليه نفس الأقسام اللي للنظري
+-- في كل مادة. النسخة الستاتيك بتقرأ الجدولين دول وبتكتب فيهم من
+-- صفحة الأدمن بنفس جلسة الأدمن التلقائية (قسم 12)، والمنصة
+-- الرئيسية بتخزن نفس الأنواع في جدول المحتوى الموحّد عندها.
+-- نفّذ القسم ده مرة واحدة في SQL Editor على المشروع الحي.
+create table if not exists public.recordings (
+  id bigint generated always as identity primary key,
+  subject_id uuid not null references public.subjects(id) on delete cascade,
+  title text not null,
+  url text,
+  file_category text not null default 'lecture' check (file_category in ('lecture','section')),
+  description text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.summaries (
+  id bigint generated always as identity primary key,
+  subject_id uuid not null references public.subjects(id) on delete cascade,
+  title text not null,
+  url text,
+  file_type text,
+  file_category text not null default 'lecture' check (file_category in ('lecture','section')),
+  description text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.recordings replica identity full;
+alter table public.summaries replica identity full;
+
+alter publication supabase_realtime add table public.recordings;
+alter publication supabase_realtime add table public.summaries;
+
+alter table public.recordings enable row level security;
+alter table public.summaries enable row level security;
+
+drop policy if exists "public read" on public.recordings;
+create policy "public read" on public.recordings for select using (true);
+drop policy if exists "public read" on public.summaries;
+create policy "public read" on public.summaries for select using (true);
+
+drop policy if exists "admin write" on public.recordings;
+create policy "admin write" on public.recordings
+  for all to authenticated using (true) with check (true);
+drop policy if exists "admin write" on public.summaries;
+create policy "admin write" on public.summaries
+  for all to authenticated using (true) with check (true);
+
+grant select on public.recordings, public.summaries to anon, authenticated;
+grant insert, update, delete on public.recordings, public.summaries to authenticated;

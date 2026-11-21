@@ -75,6 +75,29 @@ async function fetchTable(table){
     const d=await r.json(); return Array.isArray(d)?d:null;
   }catch(e){return null}
 }
+async function rpc(name,body){
+  const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`,{method:"POST",headers:{apikey:SUPABASE_ANON_KEY,Authorization:"Bearer "+SUPABASE_ANON_KEY,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok)return undefined;
+  return r.json();
+}
+/* تغيير باسورد الصفحة من جوه الصفحة نفسها: بيتحقق من الحالي وبيغيّره
+   على سيرفر Supabase عبر دالة change_owner_code (قسم 11 في
+   supabase-setup.sql). الباسورد الجديد مش بيتحفظ في أي ملف. */
+async function changePw(){
+  const cur=document.getElementById("pw-cur").value, nw=document.getElementById("pw-new").value, cf=document.getElementById("pw-conf").value;
+  const msg=document.getElementById("pw-msg");
+  const fail=t=>{msg.innerHTML=`<span style="color:#DC2626;font-weight:700">${esc(t)}</span>`};
+  if(!cur){fail("اكتب الباسورد الحالي الأول");return}
+  if(nw.length<4){fail("الباسورد الجديد قصير — ٤ حروف/أرقام على الأقل");return}
+  if(nw!==cf){fail("تأكيد الباسورد مش مطابق للباسورد الجديد");return}
+  if(nw===cur){fail("الباسورد الجديد نفس الحالي — اكتب باسورد مختلف");return}
+  let res;
+  try{ res=await rpc("change_owner_code",{current_code:cur,new_code:nw}); }catch(e){ res=undefined; }
+  if(res===undefined){fail("دالة تغيير الباسورد لسه مش متفعة — نفّذ قسم 11 من ملف supabase-setup.sql في SQL Editor");return}
+  if(res!==true){fail("الباسورد الحالي غير صحيح");return}
+  document.getElementById("pw-cur").value="";document.getElementById("pw-new").value="";document.getElementById("pw-conf").value="";
+  msg.innerHTML=`<span style="color:var(--accent);font-weight:800">✅ اتغيّر الباسورد بنجاح — الباسورد الجديد هو اللي هيفتح الصفحة من دلوقتي، فاحفظه في مكان آمن.</span>`;
+}
 async function show(){
   $app.innerHTML=`<p class="meta">بيحمّل البيانات...</p>`;
   // الزيارات والنشاط: من Supabase لو الجداول موجودة، وإلا من سجل الجهاز المحلي
@@ -107,6 +130,17 @@ async function show(){
    </section>
    <section class="card"><h3>🛡️ سجل نشاط الأدمن</h3>
      ${activity.length?activity.slice(0,200).map(a=>`<div class="rowitem" style="display:block"><strong>👤 ${esc(a.admin_name||"أدمن")} — ${esc(LABELS[a.action]||a.action)}${a.item_title?": "+esc(a.item_title):""}</strong><div class="meta">${a.subject_slug?"المادة: "+esc(a.subject_slug)+" · ":""}${fmt(a.created_at)}</div></div>`).join(""):'<p class="meta">لسه مفيش نشاط متسجل.</p>'}
+   </section>
+   <section class="card"><h3>🔑 تغيير باسورد صفحة الإدارة</h3>
+     <p class="meta">اختر باسورد جديد للصفحة دي واحفظه في مكان آمن — بعد الحفظ، الباسورد القديم مش هيفتح الصفحة تاني. التغيير بيتم على سيرفر Supabase (دالة change_owner_code — قسم 11 في supabase-setup.sql) والباسورد الجديد مش بيتحفظ في أي ملف. ولو نسيت الباسورد خالص، مفيش طريقة لاسترجاعه — الحل الوحيد وقتها تعديله بنفسك من SQL Editor في Supabase.</p>
+     <label for="pw-cur">الباسورد الحالي</label>
+     <input id="pw-cur" type="password" dir="ltr" autocomplete="off" placeholder="••••••••••">
+     <label for="pw-new">الباسورد الجديد (٤ حروف/أرقام على الأقل)</label>
+     <input id="pw-new" type="password" dir="ltr" autocomplete="new-password" placeholder="••••••••••">
+     <label for="pw-conf">تأكيد الباسورد الجديد</label>
+     <input id="pw-conf" type="password" dir="ltr" autocomplete="new-password" placeholder="••••••••••">
+     <p id="pw-msg"></p>
+     <button class="btn" onclick="changePw()">💾 حفظ الباسورد الجديد</button>
    </section>`;
 }
 let savedOk=false; try{savedOk=sessionStorage.getItem("sahli-owner-ok")==="1"}catch(e){}

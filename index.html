@@ -17,7 +17,6 @@
   :root{--bg:#F7F5F0;--surface:#fff;--surface2:#EFF6F4;--text:#1A2E2A;--dim:#6B7C78;--border:#DEE8E4;--accent:#0F766E;--accent2:#0B5E57}
   @media (prefers-color-scheme:dark){:root{--bg:#0E1513;--surface:#16211E;--surface2:#1C2B27;--text:#EAF2EF;--dim:#9AB0A9;--border:#2A3D38;--accent:#2DD4BF}}
   *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;background:var(--bg);color:var(--text)}
-  #app{padding-bottom:96px}
   main{max-width:760px;margin:0 auto;padding:16px 16px 48px}
   button{font:inherit;cursor:pointer;min-height:44px}
   .brand{background:var(--accent);color:#fff;border-radius:24px;padding:22px}
@@ -25,8 +24,8 @@
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}
   .subj{border:1px solid var(--border);border-radius:22px;padding:16px;text-align:right;background:var(--surface);width:100%}
   .subj .ic{font-size:28px}.subj h3{margin:8px 0 2px;font-size:18px}.subj .en2{color:var(--dim);font-size:12px;font-weight:700}.subj .counts{margin-top:8px;font-size:12px;font-weight:700;color:var(--dim)}
-  .tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:6px;margin-top:14px}
-  .tabs button{border:0;border-radius:12px;background:transparent;font-weight:800;color:var(--dim)}
+  .tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:6px;margin-top:14px}
+  .tabs button{border:0;border-radius:12px;background:transparent;font-weight:800;color:var(--dim);font-size:13px;padding:8px 2px;line-height:1.5}
   .tabs button.on{background:var(--accent);color:#fff}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:14px;margin-top:12px}
   .card h3{margin:0 0 6px;font-size:16px}
@@ -82,11 +81,15 @@
    ===================================================================== */
 const SUPABASE_URL = "https://hxfmjsqclyveuenquivj.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_OCCYtuz890QNDy9GpkBarg_CqjhCbt5";
-/* دخول الأدمن بالكود بس — من غير إيميل في الصفحة.
+/* دخول الأدمن بالكود بس — من غير إيميل ولا باسورد في الصفحة.
    ملحوظة أمان: الكود نفسه مش مكتوب في الملف ده خالص — التحقق بيتم
    على السيرفر عبر دالة Supabase RPC اسمها check_admin_code (قسم 6 في
-   supabase-setup.sql)، فالكود لا يصل للمتصفح أبدًا. والكتابة في قاعدة
-   البيانات من النسخة دي تتطلب جلسة أدمن صالحة في Supabase (RLS). */
+   supabase-setup.sql)، فالكود لا يصل للمتصفح أبدًا. وبعد ما الكود
+   يطلع صح، الصفحة بتسجّل دخول Supabase Auth تلقائيًا بحساب الأدمن
+   المشترك (لأن الكتابة مقفولة بـ RLS على authenticated): الإيميل
+   بييجي من دالة admin_signin_email (قسم 12) اللي بترجّعه بس لو
+   الكود صح، وباسورد الحساب مضبوطة على السيرفر على نفس قيمة الكود
+   (مزامنة قسم 12) — فلا الكود ولا الإيميل ولا أي باسورد مكتوب هنا. */
 const LIVE = () => Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 /* المواد الثمانية — مرآة لجدول subjects (وتُقرأ من الجدول نفسه عند تفعيل Supabase) */
@@ -100,7 +103,10 @@ let SUBJECTS=[
  {slug:"biochemistry-2",en:"Biochemistry 2",ar:"الكيمياء الحيوية ٢",icon:"🧪"},
  {slug:"public-health",en:"Public Health",ar:"الصحة العامة",icon:"🏥"}
 ];
-const TABLE_FOR_KIND={video:"videos",file:"files",question:"questions"};
+const TABLE_FOR_KIND={video:"videos",recording:"recordings",file:"files",summary:"summaries",question:"questions"};
+const KIND_ICONS={video:"🎬",recording:"🎙️",file:"📁",summary:"📝",question:"❓"};
+function kindNameStatic(i){const n={video:"فيديو",recording:"ريكورد",file:"ملف",summary:"ملخص",question:"سؤال وجواب"}[i.kind]||i.kind;
+  return (i.kind==="file"||i.kind==="recording"||i.kind==="summary")?n+" "+(i.file_category==="section"?"سكشن":"محاضرة"):n}
 const LS_KEY="sahli-physio-local-items";
 /* السيمسترات: سيمستر 1 افتراضيًا (مواده الثمانية)، وأي سيمستر/مادة يضيفه
    الأدمن من النسخة دي بيتحفظ محليًا على جهازه وبيندمج مع الحي */
@@ -130,6 +136,8 @@ let examsList=[], anonAll=[], featuresOpen=false, anonAsked=false, homeQuery="";
 let sb=null;                 // عميل Supabase
 let session=null;            // جلسة الأدمن (Supabase Auth)
 let adminUnlocked=false;     // بوابة كود الأدمن (التحقق من السيرفر عبر RPC)
+/* رسالة موحّدة لما الكود يفتح الأدمن للعرض لكن جلسة الكتابة مش شغالة */
+const WRITE_SESSION_MSG="الكتابة مش مفعّلة لسه: جلسة أدمن Supabase مش شغالة. التفعيل بيتم مرة واحدة بس — نفّذ قسم 12 من ملف supabase-setup.sql في Supabase (SQL Editor)، وبعدين اقفل الأدمن وادخل بالكود من جديد، وهتشتغل الإضافة والتعديل والحذف بالكود بس.";
 let view={name:"home"};
 let semConfirmPending=false;
 let announcementText="";
@@ -170,6 +178,11 @@ async function fetchAllLive(){
     sb.from("files").select("*").order("id",{ascending:false}),
     sb.from("questions").select("*").order("id",{ascending:false})
   ]);
+  /* جداول الريكوردات والملخصات (قسم 14 في supabase-setup.sql) — غيابها
+     قبل تنفيذ القسم ما يوقفش باقي الموقع، الأقسام بتظهر فاضية بس */
+  let recRows=[], sumRows=[];
+  try{const r=await sb.from("recordings").select("*").order("id",{ascending:false}); if(!r.error)recRows=r.data||[]}catch(e){}
+  try{const s2=await sb.from("summaries").select("*").order("id",{ascending:false}); if(!s2.error)sumRows=s2.data||[]}catch(e){}
   if(sems.data&&sems.data.length)SEMESTERS=sems.data.map(s=>({slug:s.slug,ar:s.name_ar,en:s.name_en||"",term:s.term_label||""}));
   if(subs.data&&subs.data.length){
     subjectSlugById={}; subjectIdBySlug={};
@@ -178,7 +191,9 @@ async function fetchAllLive(){
   }
   published=[
     ...(v.data||[]).map(r=>unify("video",r)),
+    ...recRows.map(r=>unify("recording",r)),
     ...(f.data||[]).map(r=>unify("file",r)),
+    ...sumRows.map(r=>unify("summary",r)),
     ...(q.data||[]).map(r=>unify("question",r))
   ].sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
   try{const st=await sb.from("site_settings").select("*").eq("key","announcement").maybeSingle();
@@ -211,7 +226,9 @@ async function load(){
         .on("postgres_changes",{event:"*",schema:"public",table:"subjects"},async()=>{await fetchAllLive(); if(view.name!=="admin")render()})
         .on("postgres_changes",{event:"*",schema:"public",table:"semesters"},async()=>{await fetchAllLive(); if(view.name!=="admin")render()})
         .on("postgres_changes",{event:"*",schema:"public",table:"videos"},async()=>{await fetchAllLive(); if(view.name!=="admin")render()})
+        .on("postgres_changes",{event:"*",schema:"public",table:"recordings"},async()=>{await fetchAllLive(); if(view.name!=="admin")render()})
         .on("postgres_changes",{event:"*",schema:"public",table:"files"},async()=>{await fetchAllLive(); if(view.name!=="admin")render()})
+        .on("postgres_changes",{event:"*",schema:"public",table:"summaries"},async()=>{await fetchAllLive(); if(view.name!=="admin")render()})
         .on("postgres_changes",{event:"*",schema:"public",table:"questions"},async()=>{await fetchAllLive(); if(view.name!=="admin")render()})
         .on("postgres_changes",{event:"*",schema:"public",table:"site_settings"},async()=>{await fetchAllLive(); if(view.name!=="admin")render()})
         .subscribe();
@@ -228,14 +245,14 @@ async function load(){
   try{const r=await fetch("content.json",{cache:"default"}); if(r.ok){const d=await r.json(); published=Array.isArray(d)?d:(d.items||[]);}}catch(e){published=[]}
   render();
 }
-function counts(slug){const l=bySubject(slug);return{v:l.filter(i=>i.kind==="video").length,f:l.filter(i=>i.kind==="file").length,q:l.filter(i=>i.kind==="question").length}}
+function counts(slug){const l=bySubject(slug);return{v:l.filter(i=>i.kind==="video").length,r:l.filter(i=>i.kind==="recording").length,f:l.filter(i=>i.kind==="file").length,s:l.filter(i=>i.kind==="summary").length,q:l.filter(i=>i.kind==="question").length}}
 /* ---------------- متتبع المذاكرة: تقدم الطالب في localStorage (من غير تسجيل دخول) ---------------- */
 const doneKeys=()=>lsGet("sahli-progress",[]);
 const isDone=(kind,id)=>doneKeys().includes(kind+":"+id);
 function toggleDone(kind,id){const k=kind+":"+id;let d=doneKeys();d=d.includes(k)?d.filter(x=>x!==k):[...d,k];lsSet("sahli-progress",d);render()}
-function trackProgress(list){const t=list.filter(i=>i.kind==="video"||i.kind==="file");const dn=t.filter(i=>isDone(i.kind,i.id)).length;return{done:dn,total:t.length,pct:t.length?Math.round(dn/t.length*100):0}}
+function trackProgress(list){const t=list.filter(i=>i.kind==="video"||i.kind==="recording"||i.kind==="file"||i.kind==="summary");const dn=t.filter(i=>isDone(i.kind,i.id)).length;return{done:dn,total:t.length,pct:t.length?Math.round(dn/t.length*100):0}}
 function doneCheckHtml(i){
-  if(i.kind!=="video"&&i.kind!=="file")return"";
+  if(i.kind!=="video"&&i.kind!=="recording"&&i.kind!=="file"&&i.kind!=="summary")return"";
   const dn=isDone(i.kind,i.id);
   return `<label style="display:flex;align-items:center;gap:8px;margin-top:10px;padding:8px 10px;border-radius:12px;background:${dn?"#ECFDF5":"var(--surface2)"};cursor:pointer"><input type="checkbox" ${dn?"checked":""} onchange="toggleDone('${i.kind}','${i.id}')" aria-label="تحديد «${esc(i.title)}» كمُذاكر" style="width:20px;height:20px;min-height:0;accent-color:#059669"><span style="font-size:13px;font-weight:800;color:${dn?"#047857":"var(--dim)"}">${dn?"✓ ذاكرتها وخلصتها":"علّم عليها لما تذاكرها"}</span></label>`;
 }
@@ -243,7 +260,7 @@ function progressBarHtml(list){
   const pr=trackProgress(list); if(!pr.total)return"";
   return `<section class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><strong>📈 تقدمك في المادة</strong><strong style="color:var(--accent)">${pr.pct}٪</strong></div>
   <div style="height:12px;border-radius:99px;background:var(--surface2);overflow:hidden;margin-top:8px"><div style="height:100%;width:${pr.pct}%;background:#10B981;border-radius:99px"></div></div>
-  <div class="meta" style="margin-top:6px">${pr.pct===100?("🏆 أنت خلصت 100% من المادة — كل الفيديوهات والملفات ("+pr.total+") بقوا تمام. عاش يا بطل!"):("أنت خلصت "+pr.pct+"% من المادة — "+pr.done+" من "+pr.total+" فيديو وملف. علّم بعلامة الصح على كل عنصر تذاكره وهيتحسب هنا.")}</div>
+  <div class="meta" style="margin-top:6px">${pr.pct===100?("🏆 أنت خلصت 100% من المادة — كل العناصر ("+pr.total+") بقت تمام. عاش يا بطل!"):("أنت خلصت "+pr.pct+"% من المادة — "+pr.done+" من "+pr.total+" عنصر (فيديوهات وريكوردات وملفات وملخصات). علّم بعلامة الصح على كل عنصر تذاكره وهيتحسب هنا.")}</div>
   <div class="meta">تقدمك محفوظ على جهازك ده بس (من غير تسجيل دخول) — لو فتحت من جهاز تاني هيبدأ من الصفر.</div></section>`;
 }
 function subjectProgressHtml(slug){
@@ -258,7 +275,7 @@ function homeResultsHtml(){
   const sh=allSubjects().filter(s=>s.ar.includes(raw)||(s.en||"").toLowerCase().includes(q));
   const ih=allItems().filter(i=>((i.title||"")+" "+(i.question_text||"")+" "+(i.topic||"")+" "+(i.description||"")).toLowerCase().includes(q)).slice(0,15);
   if(!sh.length&&!ih.length)return `<div class="card" style="margin-top:8px;text-align:center"><span class="meta">مفيش نتائج لـ «${esc(raw)}» — جرّب كلمة تانية أو اسم المادة بالإنجليزي</span></div>`;
-  return `<div class="card" style="margin-top:8px;padding:6px 0">${sh.map(s=>`<button class="btn ghost" style="width:100%;justify-content:flex-start;text-align:right" onclick="openSubject('${s.slug}')">${s.icon} <span><strong>${esc(s.ar)}</strong> <span class="meta">مادة كاملة</span></span></button>`).join("")}${ih.map(i=>`<button class="btn ghost" style="width:100%;justify-content:flex-start;text-align:right" onclick="openSubject('${i.subject_slug}')">${i.kind==="video"?"🎬":i.kind==="file"?"📁":"❓"} <span style="min-width:0"><strong>${esc(i.kind==="question"?(i.question_text||i.title):i.title)}</strong> <span class="meta">${esc(subj(i.subject_slug).ar)} · ${i.kind==="video"?"فيديو":i.kind==="file"?(i.file_category==="section"?"ملف سكشن":"ملف محاضرة"):"سؤال وجواب"}</span></span></button>`).join("")}</div>`;
+  return `<div class="card" style="margin-top:8px;padding:6px 0">${sh.map(s=>`<button class="btn ghost" style="width:100%;justify-content:flex-start;text-align:right" onclick="openSubject('${s.slug}')">${s.icon} <span><strong>${esc(s.ar)}</strong> <span class="meta">مادة كاملة</span></span></button>`).join("")}${ih.map(i=>`<button class="btn ghost" style="width:100%;justify-content:flex-start;text-align:right" onclick="openSubject('${i.subject_slug}')">${KIND_ICONS[i.kind]||"📁"} <span style="min-width:0"><strong>${esc(i.kind==="question"?(i.question_text||i.title):i.title)}</strong> <span class="meta">${esc(subj(i.subject_slug).ar)} · ${kindNameStatic(i)}</span></span></button>`).join("")}</div>`;
 }
 /* ---------------- الامتحانات: عدّاد تنازلي + جدول ---------------- */
 const EXAM_LABELS={midterm:"📝 ميدتيرم",practical:"🧪 عملي",final:"🎓 فاينال",other:"📌 امتحان"};
@@ -284,7 +301,7 @@ function cdTick(){
 setInterval(cdTick,1000);
 /* ---------------- زرار ؟ — مميزات المنصة ---------------- */
 const PLATFORM_FEATURES=[
- ["📚","المحتوى متقسم ومرتب بالسيمسترات والمواد (فيديوهات · ملفات محاضرات وسكاشن · أسئلة) — بدل ٥٠٠ رسالة متلخبطة على تليجرام تدوّر فيها بالساعات"],
+ ["📚","المحتوى متقسم ومرتب بالسيمسترات والمواد (فيديوهات · ريكوردات · ملفات · ملخصات · أسئلة) وكل قسم متقسم محاضرات وسكاشن عملي — بدل ٥٠٠ رسالة متلخبطة على تليجرام تدوّر فيها بالساعات"],
  ["🔍","بحث سريع في الرئيسية يوصلّك لأي محاضرة أو دكتور أو ملف أو سؤال في ثانية واحدة"],
  ["▶️","الفيديوهات والملفات بتتفتح وبتشتغل جوّه الموقع نفسه — من غير ما تخرج ولا تضيع في روابط"],
  ["✅","متتبع مذاكرة: علّم بعلامة صح على كل محاضرة وملف ذاكرته، وشريط بيقولك خلصت كام % من كل مادة"],
@@ -343,10 +360,10 @@ async function replyAnon(qid){
   render();
 }
 function render(){
-  if(view.name==="subject")return renderSubject();
-  if(view.name==="admin")return renderAdmin();
-  if(view.name==="reminders")return renderReminders();
-  if(view.name==="semester")return renderSemester();
+  if(view.name==="subject"){renderSubject();studyChipRender();return}
+  if(view.name==="admin"){renderAdmin();studyChipRender();return}
+  if(view.name==="reminders"){renderReminders();studyChipRender();return}
+  if(view.name==="semester"){renderSemester();studyChipRender();return}
   logVisit("الرئيسية");
   const sems=allSemesters();
   $app.innerHTML=`
@@ -356,9 +373,9 @@ function render(){
        <div class="logo-wrap"><span class="logo-ring"></span><span class="logo-ic"><svg width="36" height="36" viewBox="0 0 64 64" aria-hidden="true"><g fill="none"><circle cx="32" cy="13.5" r="5" fill="#0F766E"/><path d="M32 21 C25 29 39 33 32 43" stroke="#0F766E" stroke-width="5" stroke-linecap="round"/><polyline points="10,53 23,53 27,47 32,58 36,53 54,53" stroke="#0D9488" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></g></svg></span></div>
        <h1 style="margin-top:10px">سهلي فزيو</h1><div dir="ltr" style="text-align:right;opacity:.85;font-weight:700">Sahli Physio</div>
        <p style="margin:10px 0 0"><span class="pill" style="background:rgba(255,255,255,.22);color:#fff">🎓 ${esc(cohortLabel())} · كفر الشيخ</span></p>
-       <p style="line-height:1.9;margin:10px 0 0">منصة مواد العلاج الطبيعي — اختر السيمستر وادخل على مواده: فيديوهات وملفات وأسئلة في مكان واحد</p>
+       <p style="line-height:1.9;margin:10px 0 0">منصة مواد العلاج الطبيعي — اختر السيمستر وادخل على مواده: فيديوهات وريكوردات وملفات وملخصات وأسئلة في مكان واحد</p>
        ${LIVE()?`<p style="margin:8px 0 0;font-size:13px"><span class="live-dot"></span>المحتوى حي — بيتم تحديثه لحظيًا عبر Supabase Realtime</p>`:""}
-       <p style="margin:14px 0 18px"><button class="btn white" onclick="go('admin')">🔐 صفحة الأدمن</button> <button class="btn white" onclick="go('reminders')">⏰ تذكيراتي</button> <button class="btn white" id="install-btn" onclick="installApp()" aria-label="أضف إلى الشاشة الرئيسية">📲 أضف إلى الشاشة الرئيسية</button> <button class="btn white" onclick="toggleFeatures()" aria-label="مميزات المنصة — ليه سهلي فزيو أحسن من جروب التليجرام؟">؟ المميزات</button></p>
+       <p style="margin:14px 0 18px;display:flex;flex-wrap:wrap;gap:10px"><button class="btn white" onclick="go('admin')">🔐 صفحة الأدمن</button><button class="btn white" onclick="go('reminders')">⏰ تذكيراتي</button><button class="btn white" id="install-btn" onclick="installApp()" aria-label="أضف إلى الشاشة الرئيسية">📲 أضف إلى الشاشة الرئيسية</button><button class="btn white" onclick="toggleFeatures()" aria-label="مميزات المنصة — ليه سهلي فزيو أحسن من جروب التليجرام؟">؟ المميزات</button></p>
      </div>
      <img class="hero-img" src="assets/hero.webp" alt="طلاب علاج طبيعي بيذاكروا مع بعض">
    </header>
@@ -382,6 +399,7 @@ function render(){
    ${anonHtml()}`;
   refreshInstallBtn();
   cdTick();
+  studyChipRender();
 }
 function bannerHtml(){return announcementText?`<div class="card" style="border:2px solid #F59E0B;background:#FFFBEB;margin-bottom:12px"><strong>📢 ${esc(announcementText)}</strong></div>`:""}
 function openSemester(slug){view={name:"semester",slug};render()}
@@ -402,7 +420,7 @@ function renderSemester(){
        <span class="body" style="display:block;text-align:right">
        <div class="ic">${s.icon}</div><h3>${esc(s.ar)}</h3>
        <div class="en2" dir="ltr" style="text-align:right">${esc(s.en)}</div>
-       <div class="counts">🎬 ${c.v} · 📁 ${c.f} · ❓ ${c.q}${(c.v+c.f+c.q)===0?" · لسه مفيش محتوى — قريبًا":""}</div>
+       <div class="counts">🎬 ${c.v} · 🎙️ ${c.r} · 📁 ${c.f} · 📝 ${c.s} · ❓ ${c.q}${(c.v+c.r+c.f+c.s+c.q)===0?" · لسه مفيش محتوى — قريبًا":""}</div>
        ${subjectProgressHtml(s.slug)}
        <span class="open-pill">افتح المادة ←</span></span>
      </button>`}).join("")}
@@ -450,18 +468,19 @@ function renderSubject(){
   const img=SUBJECT_IMAGES[s.slug];
   const all=bySubject(s.slug).filter(i=>i.kind===tab);
   const items=all.slice(0,visible), total=all.length;
-  const labels={video:"🎬 فيديوهات",file:"📁 ملفات",question:"❓ أسئلة"};
+  const labels={video:"🎬 فيديوهات",recording:"🎙️ ريكوردات",file:"📁 ملفات",summary:"📝 ملخصات",question:"❓ أسئلة"};
+  const tabCount={video:c.v,recording:c.r,file:c.f,summary:c.s,question:c.q};
   $app.innerHTML=`
    ${bannerHtml()}
    <button class="btn ghost" onclick="openSemester('${s.semester||"semester-1"}')">→ مواد السيمستر</button>
    <header class="card" style="margin-top:12px;padding:0;overflow:hidden">${img?`<img src="${img}" alt="رسم توضيحي لمادة ${esc(s.ar)}" style="width:100%;height:130px;object-fit:cover;display:block">`:""}
      <div style="padding:14px"><div style="font-size:32px">${s.icon}</div>
      <h2 style="margin:6px 0 2px">${esc(s.ar)}</h2><div class="meta" dir="ltr" style="text-align:right">${esc(s.en)}</div>
-     <div class="meta">${c.v} فيديو · ${c.f} ملف · ${c.q} سؤال</div></div></header>
+     <div class="meta">${c.v} فيديو · ${c.r} ريكورد · ${c.f} ملف · ${c.s} ملخص · ${c.q} سؤال</div></div></header>
    ${progressBarHtml(bySubject(s.slug))}
-   <nav class="tabs">${Object.keys(labels).map(k=>`<button class="${tab===k?"on":""}" onclick="setTab('${k}')">${labels[k]} (${k==="video"?c.v:k==="file"?c.f:c.q})</button>`).join("")}</nav>
+   <nav class="tabs">${Object.keys(labels).map(k=>`<button class="${tab===k?"on":""}" onclick="setTab('${k}')">${labels[k]} (${tabCount[k]})</button>`).join("")}</nav>
    ${total===0?`<div class="empty">لسه مفيش محتوى في القسم ده — بيتم إضافته من صفحة الأدمن وبيظهر هنا لحظيًا.</div>`:
-     tab==="file"?fileGroupsHtml(items):tab==="question"?questionGroupsHtml(items):items.map((i,idx)=>cardHtml(i,idx)).join("")}
+     (tab==="file"||tab==="recording"||tab==="summary")?fileGroupsHtml(items):tab==="question"?questionGroupsHtml(items):items.map((i,idx)=>cardHtml(i,idx)).join("")}
    ${visible<total?`<p style="text-align:center"><button class="btn ghost" onclick="more()">عرض المزيد (${total-visible} متبقي)</button></p>`:""}
    ${suggestHtml(s)}
    ${reminderHtml(s)}`;
@@ -473,7 +492,19 @@ function fileGroupsHtml(items){
     return `<h3 style="margin:16px 0 2px">${cat==="lecture"?"📚 محاضرات":"🧪 سكاشن"} <span class="pill">${g.length}</span></h3>`+g.map((i,idx)=>cardHtml(i,idx)).join("");
   }).join("");
 }
+function isAudioUrl(i){if(!i.url)return false;if(/\.(mp3|m4a|ogg|oga|wav|opus|aac|flac)(\?|#|$)/i.test(i.url))return true;const ft=(i.file_type||"").toLowerCase();return ft.includes("صوت")||ft.includes("audio")}
 function cardHtml(i,idx){
+  if(i.kind==="recording"){return `<article class="card"><h3>🎙️ ${esc(i.title)}</h3>
+    <div class="row"><span class="pill" style="background:var(--accent);color:#fff">${i.file_category==="section"?"🧪 سكشن":"📚 محاضرة"}</span></div>
+    ${i.description?`<div class="meta" style="margin-top:6px">${esc(i.description)}</div>`:""}
+    ${i.url?(isAudioUrl(i)?`<audio controls preload="metadata" src="${esc(i.url)}" aria-label="تشغيل ريكورد ${esc(i.title)}" style="width:100%;margin-top:8px"></audio>`
+    :`<p class="row"><button class="btn" data-mode="iframe" data-ft="${esc(i.file_type||"")}" data-url="${esc(i.url)}" data-title="${esc(i.title)}" onclick="openViewer(this)">🎧 فتح الريكورد هنا</button><a class="btn ghost" target="_blank" rel="noopener" href="${esc(i.url)}">فتح / تحميل ↗</a></p>`):""}
+    ${doneCheckHtml(i)}</article>`}
+  if(i.kind==="summary")return `<article class="card"><h3>📝 ${esc(i.title)}</h3>
+    <div class="row"><span class="pill" style="background:var(--accent);color:#fff">${i.file_category==="section"?"🧪 سكشن":"📚 محاضرة"}</span>${i.file_type?`<span class="pill">${esc(i.file_type)}</span>`:""}</div>
+    ${i.description?`<div class="meta" style="margin-top:6px">${esc(i.description)}</div>`:""}
+    ${i.url?`<p class="row"><button class="btn" data-mode="iframe" data-ft="${esc(i.file_type||"")}" data-url="${esc(i.url)}" data-title="${esc(i.title)}" onclick="openViewer(this)">👁 عرض الملخص هنا</button><a class="btn ghost" target="_blank" rel="noopener" href="${esc(i.url)}">فتح / تحميل ↗</a></p>`:""}
+    ${doneCheckHtml(i)}</article>`;
   if(i.kind==="video"){const yt=ytId(i.url);const tg=tgPost(i.url);return `<article class="card">
     ${tg?`<div style="display:flex;justify-content:center"><script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-post="${tg}" data-width="100%"></scr`+`ipt></div>`
     :yt?`<div><button class="btn" style="width:100%;justify-content:center;min-height:120px;font-size:18px" onclick="playVideo(this.parentElement,'${yt}')">▶ تشغيل الفيديو</button></div>`:""}
@@ -522,7 +553,7 @@ function renderAdmin(){
      <button class="btn" onclick="adminUnlock()">🔓 دخول الأدمن</button>
    </section>`:
    `
-   ${LIVE()?(session?`<p class="row"><span class="pill">مسجّل في Supabase كأدمن ✓ — الكتابة مفعّلة</span><button class="btn ghost" onclick="adminLogout()">تسجيل خروج وقفل الأدمن</button></p>`:`<div class="note">🔒 الكود صح والأدمن مفتوح للعرض، لكن الكتابة في قاعدة بيانات Supabase مقفولة على جلسة الأدمن (RLS) — الإضافة والتعديل والحذف بيتموا من صفحة أدمن المنصة الرئيسية، وأي تغيير هناك بيظهر هنا لحظيًا عبر Realtime.</div>`):""}
+   ${LIVE()?(session?`<p class="row"><span class="pill">مسجّل في Supabase كأدمن ✓ — الكتابة مفعّلة</span><button class="btn ghost" onclick="adminLogout()">تسجيل خروج وقفل الأدمن</button></p>`:`<div class="note">🔒 الأدمن مفتوح للعرض بالكود، لكن جلسة الكتابة في Supabase لسه مش شغالة، فالإضافة والتعديل والحذف مش هيتموا. المفروض الصفحة تسجّل دخول الأدمن تلقائيًا بعد الكود — وده محتاج تفعيل مرة واحدة بس في Supabase: نفّذ قسم 12 من ملف supabase-setup.sql في SQL Editor (ولو كود الأدمن اتغيّر بعد كده، عيد تشغيل مزامنة الباسورد في نفس القسم)، وبعدين اقفل الأدمن وادخل بالكود من جديد.</div>`):""}
    <p class="row"><span class="pill">👤 ${esc(adminName())}</span><button class="btn ghost" onclick="changeAdminName()">تغيير الاسم</button></p>
    <section class="card"><h3>📖 إضافة مادة جديدة</h3>
     <label for="sub-semester">السيمستر</label>
@@ -538,18 +569,20 @@ function renderAdmin(){
     <label for="a-subject">المادة</label>
     <select id="a-subject">${allSubjects().map(s=>`<option value="${s.slug}">${s.icon} ${esc(s.ar)} — ${esc(s.en)}</option>`).join("")}</select>
     <label for="a-kind">النوع</label>
-    <select id="a-kind" onchange="kindChanged()"><option value="video">🎬 فيديو</option><option value="file">📁 ملف</option><option value="question">❓ سؤال</option></select>
-    <div id="f-title-wrap"><label for="a-title">العنوان *</label><input id="a-title" maxlength="300" placeholder="عنوان الفيديو أو الملف"></div>
+    <select id="a-kind" onchange="kindChanged()"><option value="video">🎬 فيديو</option><option value="recording">🎙️ ريكورد</option><option value="file">📁 ملف</option><option value="summary">📝 ملخص</option><option value="question">❓ سؤال</option></select>
+    <div id="f-title-wrap"><label for="a-title">العنوان *</label><input id="a-title" maxlength="300" placeholder="عنوان الفيديو أو الريكورد أو الملف أو الملخص"></div>
     <div id="f-url-wrap"><label for="a-url">الرابط</label><input id="a-url" dir="ltr" style="text-align:left" maxlength="2000" placeholder="https://..."></div>
+    <div id="f-upload-wrap" style="display:none"><label for="a-file">⬆️ أو ارفع ملف من جهازك (PDF / Word / PowerPoint / صور / ملف صوت / أي ملف)</label><input id="a-file" type="file" onchange="adminFileChosen(this)"><p id="a-upload-status" class="meta">الملف بيترفع على تخزين Supabase (باكت sahli-files — قسم 13 في supabase-setup.sql) ولينكه العام بيتحط في خانة الرابط تلقائيًا، فمش لازم تلصق أي لينك. الرفع بيشتغل بنفس دخول الأدمن بالكود.</p></div>
     <div id="f-type-wrap" style="display:none"><label for="a-type">صيغة الملف</label>
-      <select id="a-type"><option>PDF</option><option>PowerPoint</option><option>Word</option><option>صور</option><option>تسجيل صوتي</option><option>رابط خارجي</option><option>أخرى</option></select>
-      <label for="a-filecat">قسم الملف *</label>
-      <select id="a-filecat"><option value="lecture">📚 محاضرة</option><option value="section">🧪 سكشن</option></select></div>
+      <select id="a-type"><option>PDF</option><option>PowerPoint</option><option>Word</option><option>صور</option><option>تسجيل صوتي</option><option>رابط خارجي</option><option>أخرى</option></select></div>
+    <div id="f-cat-wrap" style="display:none"><label for="a-filecat">القسم *</label>
+      <select id="a-filecat"><option value="lecture">📚 محاضرة</option><option value="section">🧪 سكشن (عملي)</option></select></div>
     <div id="f-desc-wrap" style="display:none"><label for="a-desc">شرح / ملاحظة (اختياري)</label><textarea id="a-desc" rows="2" maxlength="2000"></textarea></div>
     <div id="f-q-wrap" style="display:none"><label for="a-q">السؤال *</label><textarea id="a-q" rows="3" maxlength="2000"></textarea>
       <label for="a-answer">الإجابة *</label><textarea id="a-answer" rows="4" maxlength="4000"></textarea>
       <label for="a-topic">الموضوع (اختياري)</label><input id="a-topic" maxlength="120" placeholder="مثال: التشريح — الأسئلة بتتجمع تحت «أسئلة عن التشريح»، وفاضي = أسئلة عامة">
-      <label for="a-img">لينك صورة (اختياري)</label><input id="a-img" dir="ltr" style="text-align:left" maxlength="2000" placeholder="https://... صورة توضيحية تظهر جوّه بطاقة السؤال"></div>
+      <label for="a-img">لينك صورة (اختياري)</label><input id="a-img" dir="ltr" style="text-align:left" maxlength="2000" placeholder="https://... صورة توضيحية تظهر جوّه بطاقة السؤال">
+      <label for="a-img-file">⬆️ أو ارفع صورة من جهازك</label><input id="a-img-file" type="file" accept="image/*" onchange="adminImageChosen(this)"><p id="a-img-upload-status" class="meta"></p></div>
     <p id="a-err" style="color:#DC2626;font-weight:700"></p>
     <div class="row"><button class="btn" onclick="saveItem()">${editing?"💾 حفظ التعديل":"➕ إضافة"}</button>
     ${editing?`<button class="btn ghost" onclick="cancelEdit()">إلغاء</button>`:""}</div>
@@ -560,7 +593,7 @@ function renderAdmin(){
    </section>`}
    <section><h3>${LIVE()?"المحتوى الحي في Supabase":"إضافاتك المحلية"} (${items.length})</h3>
    ${items.length===0?`<div class="empty">مفيش محتوى لسه.</div>`:items.map(i=>`<div class="card"><div class="row" style="justify-content:space-between">
-     <div><strong>${i.kind==="video"?"🎬":i.kind==="file"?"📄":"❓"} ${esc(i.kind==="question"?(i.question_text||""):i.title)}</strong>
+     <div><strong>${KIND_ICONS[i.kind]||"📄"} ${esc(i.kind==="question"?(i.question_text||""):i.title)}</strong>
      <div class="meta">${esc(subj(i.subject_slug).ar)} · ${i.kind}</div></div>
      <div class="row"><button class="btn ghost" style="color:#DC2626" onclick="deleteItem('${i.kind}',${i.id})">حذف</button></div></div></div>`).join("")}
    </section>
@@ -638,7 +671,7 @@ function askClearAnnouncement(){annClearPending=true; render()}
 function cancelClearAnnouncement(){annClearPending=false; render()}
 async function setAnnouncementRemote(text){
   if(LIVE()){
-    if(!session){alert("النشر في Supabase محتاج جلسة أدمن — النشر الحي بيتم من صفحة أدمن المنصة الرئيسية، وبيظهر هنا لحظيًا عبر Realtime");return false}
+    if(!session){alert(WRITE_SESSION_MSG);return false}
     const {error}=await sb.from("site_settings").upsert({key:"announcement",value:text});
     if(error){alert("فشل النشر: "+error.message+" (جدول site_settings بيتنشأ من قسم 9 في supabase-setup.sql)");return false}
     announcementText=text; return true;
@@ -683,23 +716,84 @@ async function adminUnlock(){
   const {data,error}=await sb.rpc("check_admin_code",{candidate:code});
   if(error){err.textContent="التحقق لسه مش متفعل في Supabase — نفّذ قسم 6 من ملف supabase-setup.sql في SQL Editor";return}
   if(data!==true){err.textContent="الكود غير صحيح — الأدمن مش هيتفتح";return}
+  /* الكود صح — الخطوة اللي كانت ناقصة وخلّت الكتابة تقف على «سجّل دخول
+     الأدمن الأول»: إنشاء جلسة Supabase Auth لحساب الأدمن المشترك
+     تلقائيًا، لأن سياسات RLS بتقصر الكتابة على دور authenticated.
+     الإيميل بييجي من دالة admin_signin_email (قسم 12 — بترجّعه بس لو
+     الكود صح)، وباسورد الحساب مضبوطة على السيرفر على نفس قيمة الكود
+     (مزامنة قسم 12)، فالأدمن بيدخل بالكود بس من غير أي خطوة زيادة،
+     ومفيش أي سر مكتوب في الملف ده. لو التفعيل لسه ما اتعملش في
+     Supabase، الأدمن بيفتح للعرض وبانر اللوحة بيشرح خطوة التفعيل. */
+  err.textContent="الكود صح ✓ — بيتم تفعيل جلسة الكتابة...";
+  const em=await sb.rpc("admin_signin_email",{candidate:code});
+  if(!em.error&&em.data){
+    const si=await sb.auth.signInWithPassword({email:em.data,password:code});
+    if(!si.error&&si.data&&si.data.session)session=si.data.session;
+  }
   adminUnlocked=true;
   render();
 }
 async function adminLogout(){adminUnlocked=false; if(sb)await sb.auth.signOut(); render()}
+/* ---------------- رفع ملف/صورة من جهاز الأدمن ----------------
+   الملف بيترفع على Supabase Storage (باكت sahli-files العام للقراءة،
+   والكتابة فيه للأدمن المسجّل بس — قسم 13 في supabase-setup.sql)،
+   واللينك العام اللي بيرجع بيتحط تلقائيًا في خانة رابط المحتوى أو
+   لينك صورة السؤال. الرفع بيستخدم نفس جلسة الأدمن اللي بتتعمل
+   تلقائيًا بعد إدخال الكود — مفيش أي خطوة دخول زيادة. */
+const STORAGE_BUCKET="sahli-files";
+let uploadBusy=false;
+async function uploadToStorage(file,statusEl){
+  if(!LIVE()||!sb){statusEl.textContent="الرفع محتاج اتصال Supabase مفعّل في النسخة دي";return null}
+  if(!session){statusEl.textContent=WRITE_SESSION_MSG;return null}
+  uploadBusy=true; statusEl.textContent="بيرفع الملف...";
+  const safe=file.name.replace(/[^\w.\-]+/g,"_").slice(-80)||"file";
+  const path="uploads/"+Date.now()+"-"+Math.random().toString(36).slice(2,8)+"-"+safe;
+  const up=await sb.storage.from(STORAGE_BUCKET).upload(path,file,{upsert:false});
+  uploadBusy=false;
+  if(up.error){statusEl.textContent="فشل الرفع: "+up.error.message+" — تأكد إن قسم 13 من ملف supabase-setup.sql اتنفذ مرة واحدة في Supabase (بيعمل باكت التخزين وسياساته)";return null}
+  return sb.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+async function adminFileChosen(input){
+  const f=input.files&&input.files[0]; input.value=""; if(!f)return;
+  const st=document.getElementById("a-upload-status");
+  const url=await uploadToStorage(f,st); if(!url)return;
+  document.getElementById("a-url").value=url;
+  const ext=(f.name.split(".").pop()||"").toLowerCase();
+  const typeSel=document.getElementById("a-type");
+  if(typeSel){
+    if(ext==="pdf")typeSel.value="PDF";
+    else if(ext==="doc"||ext==="docx")typeSel.value="Word";
+    else if(ext==="ppt"||ext==="pptx")typeSel.value="PowerPoint";
+    else if(["png","jpg","jpeg","gif","webp","svg"].includes(ext))typeSel.value="صور";
+    else if(["mp3","m4a","wav","ogg"].includes(ext))typeSel.value="تسجيل صوتي";
+  }
+  const t=document.getElementById("a-title");
+  if(t&&!t.value.trim())t.value=f.name.replace(/\.[^.]+$/,"");
+  st.textContent="تم رفع الملف ✓ ولينكه اتحط في خانة الرابط — راجع العنوان والصيغة وبعدين اضغط «إضافة»";
+}
+async function adminImageChosen(input){
+  const f=input.files&&input.files[0]; input.value=""; if(!f)return;
+  const st=document.getElementById("a-img-upload-status");
+  const url=await uploadToStorage(f,st); if(!url)return;
+  document.getElementById("a-img").value=url;
+  st.textContent="تم رفع الصورة ✓ ولينكها اتحط في خانة لينك الصورة";
+}
 function kindChanged(){
   const k=document.getElementById("a-kind").value;
   const show=(id,on)=>{document.getElementById(id).style.display=on?"":"none"};
   show("f-title-wrap",k!=="question"); show("f-url-wrap",k!=="question");
-  show("f-type-wrap",k==="file"); show("f-desc-wrap",true); show("f-q-wrap",k==="question");
+  show("f-upload-wrap",k==="file"||k==="recording"||k==="summary");
+  show("f-type-wrap",k==="file"||k==="summary");
+  show("f-cat-wrap",k==="file"||k==="recording"||k==="summary");
+  show("f-desc-wrap",true); show("f-q-wrap",k==="question");
 }
 function collect(){
   const k=document.getElementById("a-kind").value;
   return {kind:k,subject_slug:document.getElementById("a-subject").value,
     title:document.getElementById("a-title").value.trim(),
     url:document.getElementById("a-url").value.trim()||null,
-    file_type:k==="file"?document.getElementById("a-type").value:null,
-    file_category:k==="file"?document.getElementById("a-filecat").value:null,
+    file_type:(k==="file"||k==="summary")?document.getElementById("a-type").value:(k==="recording"?"تسجيل صوتي":null),
+    file_category:(k==="file"||k==="recording"||k==="summary")?document.getElementById("a-filecat").value:null,
     description:document.getElementById("a-desc").value.trim()||null,
     question_text:k==="question"?document.getElementById("a-q").value.trim():null,
     answer_text:k==="question"?document.getElementById("a-answer").value.trim():null,
@@ -710,16 +804,20 @@ function rowForDb(d){
   /* الكتابة بنفس أعمدة الجداول الحية: subject_id (uuid) وأسئلة question/answer */
   const sid=subjectIdBySlug[d.subject_slug]||null;
   if(d.kind==="video"){const tg=tgPost(d.url);return {subject_id:sid,title:d.title,url:tg?("https://t.me/"+tg):d.url,description:d.description}}
-  if(d.kind==="file")return {subject_id:sid,title:d.title,url:d.url,file_type:d.file_type,file_category:d.file_category||"lecture",description:d.description};
+  if(d.kind==="recording")return {subject_id:sid,title:d.title,url:d.url,file_category:d.file_category||"lecture",description:d.description};
+  if(d.kind==="file"||d.kind==="summary")return {subject_id:sid,title:d.title,url:d.url,file_type:d.file_type,file_category:d.file_category||"lecture",description:d.description};
   return {subject_id:sid,question:d.question_text,answer:d.answer_text,topic:d.topic||null,image_url:d.image_url||null,description:d.description};
 }
 async function saveItem(){
   const d=collect(),err=document.getElementById("a-err");
+  if(uploadBusy){err.textContent="استنى لما رفع الملف يخلص الأول";return}
   if(d.kind==="video"&&(!d.title||!d.url)){err.textContent="اكتب عنوان الفيديو ورابطه";return}
+  if(d.kind==="recording"&&(!d.title||!d.url)){err.textContent="اكتب عنوان الريكورد وحط رابطه أو ارفع ملف الصوت";return}
   if(d.kind==="file"&&!d.title){err.textContent="اكتب عنوان الملف";return}
+  if(d.kind==="summary"&&!d.title){err.textContent="اكتب عنوان الملخص";return}
   if(d.kind==="question"&&(!d.question_text||!d.answer_text)){err.textContent="اكتب السؤال والإجابة";return}
   if(LIVE()){
-    if(!session){err.textContent="سجّل دخول الأدمن الأول";return}
+    if(!session){err.textContent=WRITE_SESSION_MSG;return}
     err.textContent="بيحفظ في Supabase...";
     const table=TABLE_FOR_KIND[editing?editing.kind:d.kind];
     const res=editing
@@ -757,6 +855,7 @@ async function deleteItem(kind,id){
   if(!confirm("حذف العنصر ده نهائيًا؟"))return;
   const it=(LIVE()?published:localItems()).find(x=>x.kind===kind&&x.id===id);
   if(LIVE()){
+    if(!session){alert(WRITE_SESSION_MSG);return}
     const {error}=await sb.from(TABLE_FOR_KIND[kind]).delete().eq("id",id);
     if(error){alert("فشل الحذف: "+error.message);return}
     if(it)logActivity("delete",kind,it.subject_slug,it.kind==="question"?it.question_text:it.title);
@@ -775,7 +874,7 @@ function importJson(input){
   const f=input.files&&input.files[0];if(!f)return;
   const r=new FileReader();
   r.onload=()=>{try{const d=JSON.parse(r.result);const arr=Array.isArray(d)?d:(d.items||[]);
-    const clean=arr.filter(i=>i&&allSubjects().some(s=>s.slug===i.subject_slug)&&["video","file","question"].includes(i.kind))
+    const clean=arr.filter(i=>i&&allSubjects().some(s=>s.slug===i.subject_slug)&&["video","recording","file","summary","question"].includes(i.kind))
       .map((i,idx)=>({id:Date.now()+idx,subject_slug:i.subject_slug,kind:i.kind,title:String(i.title||"").slice(0,300),url:i.url||null,file_type:i.file_type||null,file_category:i.file_category||"lecture",description:i.description||null,question_text:i.question_text||null,answer_text:i.answer_text||null,topic:i.topic||null,image_url:i.image_url||null,created_at:i.created_at||new Date().toISOString()}));
     saveLocal([...clean,...localItems()]);render();alert("تم استيراد "+clean.length+" عنصر")}catch(e){alert("الملف غير صالح")}};
   r.readAsText(f);
@@ -785,9 +884,9 @@ function suggestHtml(s){
   if(!suggestOpen)return `<div style="text-align:center;margin-top:18px"><button class="btn ghost" onclick="toggleSuggest(true)">🤝 شارك وساعد</button><p class="meta">عندك مصدر مفيد للمادة دي؟ اقترحه وهيوصل للأدمن للمراجعة</p></div>`;
   return `<section class="card"><h3>🤝 شارك وساعد — اقترح مصدر لـ${esc(s.ar)}</h3>
    <label for="sg-kind">نوع المصدر</label>
-   <select id="sg-kind" onchange="sgKindChanged()"><option value="video">🎬 فيديو</option><option value="file">📁 ملف</option><option value="question">❓ سؤال</option></select>
-   <div id="sg-filecat-wrap" style="display:none"><label for="sg-filecat">قسم الملف</label>
-   <select id="sg-filecat"><option value="lecture">📚 محاضرة</option><option value="section">🧪 سكشن</option></select></div>
+   <select id="sg-kind" onchange="sgKindChanged()"><option value="video">🎬 فيديو</option><option value="recording">🎙️ ريكورد</option><option value="file">📁 ملف</option><option value="summary">📝 ملخص</option><option value="question">❓ سؤال</option></select>
+   <div id="sg-filecat-wrap" style="display:none"><label for="sg-filecat">القسم</label>
+   <select id="sg-filecat"><option value="lecture">📚 محاضرة</option><option value="section">🧪 سكشن (عملي)</option></select></div>
    <div id="sg-title-wrap"><label for="sg-title">العنوان *</label><input id="sg-title" maxlength="300" placeholder="عنوان المصدر"></div>
    <div id="sg-url-wrap"><label for="sg-url">اللينك *</label><input id="sg-url" dir="ltr" style="text-align:left" maxlength="2000" placeholder="https://..."></div>
    <div id="sg-q-wrap" style="display:none"><label for="sg-q">السؤال *</label><textarea id="sg-q" rows="3" maxlength="2000"></textarea>
@@ -803,7 +902,7 @@ function toggleSuggest(on){suggestOpen=on;render()}
 function sgKindChanged(){
   const k=document.getElementById("sg-kind").value;
   const show=(id,on)=>{document.getElementById(id).style.display=on?"":"none"};
-  show("sg-title-wrap",k!=="question"); show("sg-url-wrap",k!=="question"); show("sg-q-wrap",k==="question"); show("sg-filecat-wrap",k==="file");
+  show("sg-title-wrap",k!=="question"); show("sg-url-wrap",k!=="question"); show("sg-q-wrap",k==="question"); show("sg-filecat-wrap",k==="file"||k==="recording"||k==="summary");
 }
 async function sendSuggestion(slug){
   const k=document.getElementById("sg-kind").value, err=document.getElementById("sg-err");
@@ -814,10 +913,12 @@ async function sendSuggestion(slug){
     answer_text:k==="question"?document.getElementById("sg-a").value.trim():null,
     topic:k==="question"?document.getElementById("sg-topic").value.trim()||null:null,
     image_url:k==="question"?document.getElementById("sg-img").value.trim()||null:null,
-    file_category:k==="file"?document.getElementById("sg-filecat").value:null,
+    file_category:(k==="file"||k==="recording"||k==="summary")?document.getElementById("sg-filecat").value:null,
     suggester_name:document.getElementById("sg-name").value.trim()};
   if(k==="video"&&(!d.title||!d.url)){err.textContent="اكتب عنوان الفيديو ورابطه";return}
+  if(k==="recording"&&(!d.title||!d.url)){err.textContent="اكتب عنوان الريكورد ورابطه";return}
   if(k==="file"&&!d.title){err.textContent="اكتب عنوان الملف";return}
+  if(k==="summary"&&!d.title){err.textContent="اكتب عنوان الملخص";return}
   if(k==="question"&&(!d.question_text||!d.answer_text)){err.textContent="اكتب السؤال والإجابة";return}
   if(LIVE()&&sb){
     const {error}=await sb.from("suggestions").insert({subject_id:subjectIdBySlug[slug]||null,subject_slug:slug,kind:k,title:k==="question"?"":d.title,url:d.url,file_category:d.file_category||"lecture",question:d.question_text,answer:d.answer_text,topic:d.topic,image_url:d.image_url,suggester_name:d.suggester_name});
@@ -835,7 +936,7 @@ async function loadSuggestionsStatic(){
     if(!error&&data)rows=data.map(r=>({id:r.id,subject_slug:r.subject_slug||subjectSlugById[r.subject_id]||"",kind:r.kind,title:r.title||"",url:r.url||null,file_category:r.file_category||"lecture",question_text:r.question||null,answer_text:r.answer||null,topic:r.topic||null,image_url:r.image_url||null,suggester_name:r.suggester_name||"",live:true}));
   } else rows=lsGet("sahli-suggestions",[]).filter(x=>x.status==="pending");
   if(!rows.length){host.innerHTML=`<div class="meta">مفيش اقتراحات مستنية المراجعة — أو قراءتها محتاجة جلسة أدمن في Supabase.</div>`;return}
-  host.innerHTML=rows.map(r=>`<div class="card" style="margin-top:8px"><strong>${r.kind==="video"?"🎬":r.kind==="file"?"📄":"❓"} ${esc(r.kind==="question"?(r.question_text||""):r.title)}</strong>
+  host.innerHTML=rows.map(r=>`<div class="card" style="margin-top:8px"><strong>${KIND_ICONS[r.kind]||"📄"} ${esc(r.kind==="question"?(r.question_text||""):r.title)}</strong>
     <div class="meta">${esc(subj(r.subject_slug).ar)}${r.suggester_name?" · 👤 "+esc(r.suggester_name):""}</div>
     ${r.url?`<div class="meta" dir="ltr" style="text-align:left">${esc(r.url)}</div>`:""}
     ${r.kind==="question"&&r.answer_text?`<div class="meta">الإجابة المقترحة: ${esc(r.answer_text)}</div>`:""}
@@ -845,8 +946,9 @@ async function loadSuggestionsStatic(){
 }
 async function reviewSuggestion(id,accept,live){
   if(live){
+    if(!session){alert(WRITE_SESSION_MSG);return}
     const {data,error}=await sb.from("suggestions").select("*").eq("id",id).single();
-    if(error||!data){alert("الاقتراح غير موجود أو القراءة محتاجة جلسة أدمن");return}
+    if(error||!data){alert("الاقتراح غير موجود");return}
     const slug=data.subject_slug||subjectSlugById[data.subject_id]||"";
     if(accept){
       const d={kind:data.kind,subject_slug:slug,title:data.title||"",url:data.url||null,file_type:null,file_category:data.file_category||"lecture",description:null,question_text:data.question,answer_text:data.answer,topic:data.topic||null,image_url:data.image_url||null};
@@ -878,7 +980,7 @@ async function addExamStatic(){
   if(!dv){err.textContent="اختر تاريخ ووقت الامتحان";return}
   const row={title,exam_type:document.getElementById("ex-type").value,subject_slug:document.getElementById("ex-subject").value||null,exam_date:new Date(dv).toISOString(),note:document.getElementById("ex-note").value.trim()||null};
   if(LIVE()&&sb){
-    if(!session){err.textContent="إضافة الامتحانات في Supabase محتاجة جلسة أدمن — الإضافة الحية بتتم من صفحة إدارة المنصة الرئيسية وبتظهر هنا لحظيًا";return}
+    if(!session){err.textContent=WRITE_SESSION_MSG;return}
     const {error}=await sb.from("exams").insert(row);
     if(error){err.textContent="فشل الحفظ: "+error.message+" (جدول الامتحانات بيتنشأ من قسم 10 في supabase-setup.sql)";return}
     await fetchAllLive();
@@ -894,6 +996,7 @@ async function deleteExamStatic(id){
   if(!confirm("حذف الامتحان ده؟"))return;
   const ex=examsList.find(e=>String(e.id)===String(id));
   if(LIVE()&&sb){
+    if(!session){alert(WRITE_SESSION_MSG);return}
     const {error}=await sb.from("exams").delete().eq("id",id);
     if(error){alert("فشل الحذف: "+error.message);return}
     await fetchAllLive();
@@ -925,8 +1028,9 @@ async function answerAnonStatic(id){
   if(!text){alert("اكتب الإجابة الأول");return}
   const q0=anonAll.find(x=>String(x.id)===String(id));
   if(LIVE()&&sb){
+    if(!session){alert(WRITE_SESSION_MSG);return}
     const {error}=await sb.from("anon_questions").update({answer_text:text,status:"published"}).eq("id",id);
-    if(error){alert("فشل النشر: "+error.message+" — النشر محتاج جلسة أدمن في Supabase");return}
+    if(error){alert("فشل النشر: "+error.message);return}
     await fetchAllLive();
   } else {
     if(q0){q0.answer_text=text;q0.status="published"; lsSet("sahli-anon-questions",anonAll)}
@@ -938,6 +1042,7 @@ async function deleteAnonStatic(id){
   if(!confirm("حذف السؤال ده وكل ردوده نهائيًا؟"))return;
   const q0=anonAll.find(x=>String(x.id)===String(id));
   if(LIVE()&&sb){
+    if(!session){alert(WRITE_SESSION_MSG);return}
     await sb.from("anon_replies").delete().eq("question_id",id);
     const {error}=await sb.from("anon_questions").delete().eq("id",id);
     if(error){alert("فشل الحذف: "+error.message);return}
@@ -949,6 +1054,7 @@ async function deleteAnonStatic(id){
 async function deleteAnonReplyStatic(id){
   if(!confirm("حذف الرد ده؟"))return;
   if(LIVE()&&sb){
+    if(!session){alert(WRITE_SESSION_MSG);return}
     const {error}=await sb.from("anon_replies").delete().eq("id",id);
     if(error){alert("فشل حذف الرد: "+error.message);return}
     await fetchAllLive();
@@ -964,7 +1070,7 @@ function reminderHtml(s){
   const items=bySubject(s.slug);
   return `<section class="card"><h3>⏰ تذكير مذاكرة — ${esc(s.ar)}</h3>
    <label for="rm-item">العنصر (اختياري)</label>
-   <select id="rm-item"><option value="">المادة كلها</option>${items.map(i=>`<option value="${esc(i.kind==="question"?(i.question_text||i.title):i.title)}">${i.kind==="video"?"🎬":i.kind==="file"?"📁":"❓"} ${esc((i.kind==="question"?(i.question_text||i.title):i.title).slice(0,80))}</option>`).join("")}</select>
+   <select id="rm-item"><option value="">المادة كلها</option>${items.map(i=>`<option value="${esc(i.kind==="question"?(i.question_text||i.title):i.title)}">${KIND_ICONS[i.kind]||"📁"} ${esc((i.kind==="question"?(i.question_text||i.title):i.title).slice(0,80))}</option>`).join("")}</select>
    <label>امتى أذكّرك؟</label>
    <div class="row">${[[30,"بعد ٣٠ دقيقة"],[60,"بعد ساعة"],[180,"بعد ٣ ساعات"],[1440,"بكرة نفس الوقت"]].map(([m,l])=>`<button class="btn ${!rmUseCustom&&rmDelayMin===m?"":"ghost"}" onclick="rmSetDelay(${m})">${l}</button>`).join("")}<button class="btn ${rmUseCustom?"":"ghost"}" onclick="rmSetCustom()">🕐 وقت محدد</button></div>
    ${rmUseCustom?`<input id="rm-time" type="datetime-local" dir="ltr" style="text-align:left">`:""}
@@ -1018,7 +1124,7 @@ function rm2FillItems(){
   const sel=document.getElementById("rm2-subject"), item=document.getElementById("rm2-item");
   if(!sel||!item)return;
   const items=bySubject(sel.value);
-  item.innerHTML=`<option value="">المادة كلها</option>`+items.map(i=>`<option value="${esc(i.kind==="question"?(i.question_text||i.title):i.title)}">${i.kind==="video"?"🎬":i.kind==="file"?"📁":"❓"} ${esc((i.kind==="question"?(i.question_text||i.title):i.title).slice(0,80))}</option>`).join("");
+  item.innerHTML=`<option value="">المادة كلها</option>`+items.map(i=>`<option value="${esc(i.kind==="question"?(i.question_text||i.title):i.title)}">${KIND_ICONS[i.kind]||"📁"} ${esc((i.kind==="question"?(i.question_text||i.title):i.title).slice(0,80))}</option>`).join("");
 }
 function saveReminder2(){
   const slug=document.getElementById("rm2-subject").value, s0=subj(slug), err=document.getElementById("rm2-err");
@@ -1067,7 +1173,11 @@ let studyHidden=false; try{studyHidden=localStorage.getItem("sahli-study-hidden"
 function studySetHidden(v){studyHidden=v; if(v)studyExpanded=false; try{if(v)localStorage.setItem("sahli-study-hidden","1");else localStorage.removeItem("sahli-study-hidden")}catch(e){} studyChipRender()}
 function studyChipRender(){
   let chip=document.getElementById("study-chip");
-  if(!chip){chip=document.createElement("div");chip.id="study-chip";chip.style.cssText="position:fixed;bottom:12px;inset-inline-end:12px;z-index:80;display:flex;flex-direction:column;align-items:flex-end;gap:8px";document.body.appendChild(chip)}
+  /* الكبسولة جوّه تدفق الصفحة في أول المحتوى (sticky فوق) — ليها مكانها
+     المحجوز في التخطيط فمبتغطيش أي محتوى أبدًا، وبتفضل باينة وهي
+     بتتحرك مع التمرير من مكانها الطبيعي. render() بيعيد بناء #app كل
+     مرة فبينادي studyChipRender بعده عشان الكبسولة ترجع لمكانها. */
+  if(!chip){chip=document.createElement("div");chip.id="study-chip";chip.style.cssText="position:sticky;top:8px;z-index:80;display:flex;flex-direction:column;align-items:flex-end;gap:8px;margin-bottom:10px";$app.insertBefore(chip,$app.firstChild)}
   const d=studyLoad(), today=d.days[dayKeyOf()]||0, pct=Math.min(100,Math.round(today/3600*100)), streak=streakOf(d.days);
   if(studyHidden){
     chip.innerHTML=`<button aria-label="إظهار عداد وقت المذاكرة" onclick="studySetHidden(false)" style="width:36px;height:36px;border-radius:99px;border:1px solid var(--border);background:var(--surface);color:var(--dim);font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.08);cursor:pointer">⏱</button>`;
