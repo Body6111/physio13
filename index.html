@@ -573,6 +573,7 @@ function renderAdmin(){
     <div id="f-title-wrap"><label for="a-title">العنوان *</label><input id="a-title" maxlength="300" placeholder="عنوان الفيديو أو الريكورد أو الملف أو الملخص"></div>
     <div id="f-url-wrap"><label for="a-url">الرابط</label><input id="a-url" dir="ltr" style="text-align:left" maxlength="2000" placeholder="https://..."></div>
     <div id="f-upload-wrap" style="display:none"><label for="a-file">⬆️ أو ارفع ملف من جهازك (PDF / Word / PowerPoint / صور / ملف صوت / أي ملف)</label><input id="a-file" type="file" onchange="adminFileChosen(this)"><p id="a-upload-status" class="meta">الملف بيترفع على تخزين Supabase (باكت sahli-files — قسم 13 في supabase-setup.sql) ولينكه العام بيتحط في خانة الرابط تلقائيًا، فمش لازم تلصق أي لينك. الرفع بيشتغل بنفس دخول الأدمن بالكود.</p></div>
+    <div id="f-bulk-wrap" style="display:none"><label for="a-bulk-imgs">🖼️ رفع صور كتير مرة واحدة (٢٠ صورة أو أكتر)</label><input id="a-bulk-imgs" type="file" accept="image/*" multiple onchange="adminBulkImagesChosen(this)"><p id="a-bulk-status" class="meta">اختار كل الصور مرة واحدة من جهازك — كل صورة هتترفع وتتضاف لوحدها بصيغة «صور» وبعنوان اسمها، في المادة والقسم (محاضرة/سكشن) اللي اخترتهم فوق. اختر المادة والقسم الأول وبعدين ارفع.</p></div>
     <div id="f-type-wrap" style="display:none"><label for="a-type">صيغة الملف</label>
       <select id="a-type"><option>PDF</option><option>PowerPoint</option><option>Word</option><option>صور</option><option>تسجيل صوتي</option><option>رابط خارجي</option><option>أخرى</option></select></div>
     <div id="f-cat-wrap" style="display:none"><label for="a-filecat">القسم *</label>
@@ -778,11 +779,39 @@ async function adminImageChosen(input){
   document.getElementById("a-img").value=url;
   st.textContent="تم رفع الصورة ✓ ولينكها اتحط في خانة لينك الصورة";
 }
+/* ---------------- رفع جماعي للصور ----------------
+   الأدمن يختار أي عدد من الصور مرة واحدة (٢٠ أو أكتر — مفيش حد أقصى
+   لعدد الصور في المرة الواحدة)، فتترفع واحدة ورا التانية على باكت
+   sahli-files وكل صورة بتتضاف كعنصر لوحدها بصيغة «صور» وعنوانها اسم
+   الصورة، في المادة والقسم (محاضرة/سكشن) المختارين في النموذج. */
+async function adminBulkImagesChosen(input){
+  const files=input.files?Array.from(input.files):[]; input.value=""; if(!files.length)return;
+  const st=document.getElementById("a-bulk-status");
+  if(!LIVE()||!sb){st.textContent="الرفع الجماعي محتاج اتصال Supabase مفعّل في النسخة دي";return}
+  if(!session){st.textContent=WRITE_SESSION_MSG;return}
+  const d=collect();
+  let added=0; const failed=[];
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    st.textContent="بيرفع صورة "+(i+1)+" من "+files.length+": "+f.name;
+    const url=await uploadToStorage(f,st);
+    if(!url){failed.push(f.name);continue}
+    const row=rowForDb({kind:d.kind,subject_slug:d.subject_slug,title:f.name.replace(/\.[^.]+$/,""),url:url,file_type:"صور",file_category:d.file_category||"lecture",description:null,question_text:null,answer_text:null,topic:null,image_url:null});
+    const res=await sb.from(TABLE_FOR_KIND[d.kind]).insert(row);
+    if(res.error){failed.push(f.name);continue}
+    added++;
+  }
+  if(added>0)logActivity("add",d.kind,d.subject_slug,"رفع جماعي: "+added+" صورة");
+  const msg="خلص الرفع الجماعي ✓ اتضافت "+added+" صورة من أصل "+files.length+(failed.length?(" — وفشل "+failed.length+": "+failed.slice(0,5).join("، ")):"");
+  await fetchAllLive(); render();
+  const st2=document.getElementById("a-bulk-status"); if(st2)st2.textContent=msg;
+}
 function kindChanged(){
   const k=document.getElementById("a-kind").value;
   const show=(id,on)=>{document.getElementById(id).style.display=on?"":"none"};
   show("f-title-wrap",k!=="question"); show("f-url-wrap",k!=="question");
   show("f-upload-wrap",k==="file"||k==="recording"||k==="summary");
+  show("f-bulk-wrap",k==="file"||k==="summary");
   show("f-type-wrap",k==="file"||k==="summary");
   show("f-cat-wrap",k==="file"||k==="recording"||k==="summary");
   show("f-desc-wrap",true); show("f-q-wrap",k==="question");
