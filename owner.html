@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
+<title>صفحة الإدارة — سهلي فزيو</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='16' fill='%230F766E'/><circle cx='32' cy='13.5' r='5' fill='white'/><path d='M32 21 C25 29 39 33 32 43' stroke='white' stroke-width='5' stroke-linecap='round' fill='none'/><polyline points='10,53 23,53 27,47 32,58 36,53 54,53' stroke='%235EEAD4' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/></svg>" />
+<style>
+  :root{--bg:#F7F5F0;--surface:#fff;--surface2:#EFF6F4;--text:#1A2E2A;--dim:#6B7C78;--border:#DEE8E4;--accent:#0F766E}
+  @media (prefers-color-scheme:dark){:root{--bg:#0E1513;--surface:#16211E;--surface2:#1C2B27;--text:#EAF2EF;--dim:#9AB0A9;--border:#2A3D38;--accent:#2DD4BF}}
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;background:var(--bg);color:var(--text)}
+  main{max-width:760px;margin:0 auto;padding:16px 16px 48px}
+  button{font:inherit;cursor:pointer;min-height:44px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:16px;margin-top:14px}
+  .btn{display:inline-flex;align-items:center;min-height:40px;padding:0 16px;border-radius:999px;background:var(--accent);color:#fff;text-decoration:none;font-weight:800;border:0}
+  .btn.ghost{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+  input{width:100%;font:inherit;padding:11px 12px;border-radius:12px;border:1px solid var(--border);background:var(--bg);color:var(--text);margin:4px 0 12px}
+  label{font-weight:800;font-size:14px}
+  .meta{color:var(--dim);font-size:13px;line-height:1.8}
+  .rowitem{display:flex;justify-content:space-between;gap:8px;background:var(--surface2);border-radius:12px;padding:8px 12px;margin-top:6px;font-size:14px;font-weight:700}
+  .badge{background:var(--accent);color:#fff;border-radius:999px;padding:1px 10px;font-size:12px;font-weight:800}
+  .warn{background:#FEF3C7;color:#92400E;border-radius:14px;padding:12px 14px;font-size:13px;line-height:1.9;margin-top:12px}
+  @media (prefers-color-scheme:dark){.warn{background:#3a2f10;color:#FCD34D}}
+  .big{font-size:40px;font-weight:900;color:var(--accent);text-align:center}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+"use strict";
+/* صفحة الإدارة المخفية — لا رابط لها من أي مكان في الموقع ولا في صفحة الأدمن.
+   تتفتح من عنوانها المباشر owner.html بس، وليها باسورد خاص بيها لوحدها
+   (مختلف عن كود الأدمن) فالأدمنز ميقدروش يفتحوها.
+   الباسورد نفسه مش مكتوب في الملف ده خالص — التحقق بيتم على السيرفر
+   عبر دالة Supabase RPC اسمها check_owner_code (قسم 6 في supabase-setup.sql). */
+const SUPABASE_URL="https://hxfmjsqclyveuenquivj.supabase.co";
+const SUPABASE_ANON_KEY="sb_publishable_OCCYtuz890QNDy9GpkBarg_CqjhCbt5";
+const $app=document.getElementById("app");
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const lsGet=(k,d)=>{try{return JSON.parse(localStorage.getItem(k)||"null")??d}catch{return d}};
+const LABELS={add:"إضافة محتوى",update:"تعديل محتوى",delete:"حذف محتوى",add_semester:"إضافة سيمستر",add_subject:"إضافة مادة",update_cohort:"تغيير سنة الدفعة"};
+const fmt=iso=>new Date(iso).toLocaleString("ar-EG",{dateStyle:"medium",timeStyle:"short"});
+
+function gate(err){
+  $app.innerHTML=`
+   <section class="card" style="text-align:center;max-width:440px;margin:40px auto">
+     <div><svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#0F766E"/><g fill="none"><circle cx="32" cy="13.5" r="5" fill="#fff"/><path d="M32 21 C25 29 39 33 32 43" stroke="#fff" stroke-width="5" stroke-linecap="round"/><polyline points="10,53 23,53 27,47 32,58 36,53 54,53" stroke="#5EEAD4" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></g></svg></div>
+     <h2>صفحة الإدارة</h2>
+     <p dir="ltr" style="font-weight:900;color:var(--accent);letter-spacing:.03em;margin:2px 0">Abdelrhman Safwat</p>
+     <p class="meta">صفحة خاصة بصاحب الموقع — اكتب الباسورد عشان تعرض الإحصائيات وسجل النشاط.</p>
+     <label for="code">باسورد صفحة الإدارة</label>
+     <input id="code" type="password" dir="ltr" style="text-align:center;letter-spacing:4px" autocomplete="off" placeholder="••••••••••">
+     ${err?`<p style="color:#DC2626;font-weight:700">${esc(err)}</p>`:""}
+     <button class="btn" onclick="unlock()">🔓 فتح</button>
+     <p><a class="btn ghost" href="index.html">🏠 رجوع للموقع</a></p>
+   </section>`;
+}
+async function unlock(){
+  const code=document.getElementById("code").value.trim();
+  if(!code){gate("اكتب الباسورد الأول");return}
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/check_owner_code`,{method:"POST",headers:{apikey:SUPABASE_ANON_KEY,Authorization:"Bearer "+SUPABASE_ANON_KEY,"Content-Type":"application/json"},body:JSON.stringify({candidate:code})});
+    if(!r.ok){gate("التحقق لسه مش متفعل في Supabase — نفّذ قسم 6 من ملف supabase-setup.sql في SQL Editor");return}
+    const ok=await r.json();
+    if(ok!==true){gate("الباسورد غير صحيح");return}
+  }catch(e){gate("حصلت مشكلة في التحقق — حاول تاني");return}
+  try{sessionStorage.setItem("sahli-owner-ok","1")}catch(e){}
+  await show();
+}
+async function fetchTable(table){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*&order=id.desc&limit=2000`,{headers:{apikey:SUPABASE_ANON_KEY,Authorization:"Bearer "+SUPABASE_ANON_KEY}});
+    if(!r.ok)return null;
+    const d=await r.json(); return Array.isArray(d)?d:null;
+  }catch(e){return null}
+}
+async function show(){
+  $app.innerHTML=`<p class="meta">بيحمّل البيانات...</p>`;
+  // الزيارات والنشاط: من Supabase لو الجداول موجودة، وإلا من سجل الجهاز المحلي
+  let visits=await fetchTable("visits");
+  let activity=await fetchTable("activity_log");
+  const localVisits=lsGet("sahli-visits",[]), localActivity=lsGet("sahli-activity",[]);
+  if(!visits||visits.length===0)visits=localVisits;
+  if(!activity||activity.length===0)activity=localActivity;
+  visits=[...(visits||[])].sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
+  activity=[...(activity||[])].sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
+  const perPage={},perDay={},perCity={};
+  for(const v of visits){
+    perPage[v.page]=(perPage[v.page]||0)+1;
+    const day=String(v.created_at||"").slice(0,10); if(day)perDay[day]=(perDay[day]||0)+1;
+    if(v.city||v.country){const k=[v.city,v.country].filter(Boolean).join("، ");perCity[k]=(perCity[k]||0)+1}
+  }
+  const rows=(obj,fmtKey)=>Object.entries(obj).sort((a,b)=>b[1]-a[1]).map(([k,c])=>`<div class="rowitem"><span>${fmtKey?fmtKey(k):esc(k)}</span><span class="badge">${c}</span></div>`).join("");
+  $app.innerHTML=`
+   <p><a class="btn ghost" href="index.html">🏠 الرجوع للموقع</a></p>
+   <h2>👑 صفحة الإدارة — <span dir="ltr">Abdelrhman Safwat</span></h2>
+   <section class="card"><p class="meta" style="text-align:center">👀 إجمالي زيارات الموقع</p><p class="big">${visits.length}</p></section>
+   <section class="card"><h3>📄 الزيارات لكل صفحة / مادة</h3>${Object.keys(perPage).length?rows(perPage):'<p class="meta">لسه مفيش زيارات متسجلة.</p>'}</section>
+   <section class="card"><h3>📅 الزيارات لكل يوم</h3>${Object.keys(perDay).length?rows(perDay,k=>new Date(k+"T00:00:00").toLocaleDateString("ar-EG",{weekday:"long",day:"numeric",month:"long"})):'<p class="meta">لسه مفيش زيارات.</p>'}</section>
+   <section class="card"><h3>🗺️ الزيارات حسب المدينة / الدولة (من الـ IP)</h3>
+     ${Object.keys(perCity).length?rows(perCity):'<p class="meta">بيانات المدينة/الدولة غير متاحة في الزيارات المتسجلة حاليًا (الـ IP لا يصل من المتصفح ولا من بيئة التشغيل الحالية).</p>'}
+     <div class="warn">⚠️ تنبيه: الـ IP عنوان شبكة مش هوية شخص — ممكن يتشارك بين ناس كتير أو يتغير مع باقات الموبايل والـ VPN. والمكان المشتق منه تقريبي (غالبًا مكان شركة الإنترنت)، مش عنوان دقيق ولا GPS.</div>
+   </section>
+   <section class="card"><h3>🧾 أحدث الزيارات</h3>
+     ${visits.length?visits.slice(0,100).map(v=>`<div class="rowitem" style="display:block"><strong>${esc(v.page)}</strong><div class="meta">${fmt(v.created_at)} · IP: ${esc(v.ip||"غير متاح")} · المكان: ${esc([v.city,v.country].filter(Boolean).join("، ")||"غير متاح")}</div></div>`).join(""):'<p class="meta">لسه مفيش زيارات.</p>'}
+   </section>
+   <section class="card"><h3>🛡️ سجل نشاط الأدمن</h3>
+     ${activity.length?activity.slice(0,200).map(a=>`<div class="rowitem" style="display:block"><strong>👤 ${esc(a.admin_name||"أدمن")} — ${esc(LABELS[a.action]||a.action)}${a.item_title?": "+esc(a.item_title):""}</strong><div class="meta">${a.subject_slug?"المادة: "+esc(a.subject_slug)+" · ":""}${fmt(a.created_at)}</div></div>`).join(""):'<p class="meta">لسه مفيش نشاط متسجل.</p>'}
+   </section>`;
+}
+let savedOk=false; try{savedOk=sessionStorage.getItem("sahli-owner-ok")==="1"}catch(e){}
+if(savedOk)show(); else gate("");
+</script>
+</body>
+</html>
