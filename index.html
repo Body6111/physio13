@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>سهلي فزيو — Sahli Physio | علاج طبيعي سنة تانية</title>
+<title>سهّلي فيزيو — Sahli Physio | علاج طبيعي سنة تانية</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='16' fill='%230F766E'/><circle cx='32' cy='13.5' r='5' fill='white'/><path d='M32 21 C25 29 39 33 32 43' stroke='white' stroke-width='5' stroke-linecap='round' fill='none'/><polyline points='10,53 23,53 27,47 32,58 36,53 54,53' stroke='%235EEAD4' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/></svg>" />
-<meta name="description" content="سهلي فزيو — Sahli Physio: منصة مواد سنة تانية علاج طبيعي، الترم الأول. فيديوهات وملفات وأسئلة لكل مادة — محتوى حي عبر Supabase Realtime." />
+<meta name="description" content="سهّلي فيزيو — Sahli Physio: منصة مواد سنة تانية علاج طبيعي، الترم الأول. فيديوهات وملفات وأسئلة لكل مادة — محتوى حي عبر Supabase Realtime." />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#0F766E" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta name="apple-mobile-web-app-title" content="سهلي فزيو" />
+<meta name="apple-mobile-web-app-title" content="سهّلي فيزيو" />
 <style>
   :root{--bg:#F7F5F0;--surface:#fff;--surface2:#EFF6F4;--text:#1A2E2A;--dim:#6B7C78;--border:#DEE8E4;--accent:#0F766E;--accent2:#0B5E57}
   @media (prefers-color-scheme:dark){:root{--bg:#0E1513;--surface:#16211E;--surface2:#1C2B27;--text:#EAF2EF;--dim:#9AB0A9;--border:#2A3D38;--accent:#2DD4BF}}
@@ -70,7 +70,7 @@
 </head>
 <body>
 <main id="app"></main>
-<footer>سهلي فزيو · Sahli Physio — علاج طبيعي · كفر الشيخ<div dir="ltr" style="margin-top:6px;font-weight:700;letter-spacing:.04em">Made By <span style="color:var(--accent);font-weight:900">Abdelrhman Safwat</span></div></footer>
+<footer>سهّلي فيزيو · Sahli Physio — علاج طبيعي · كفر الشيخ<div dir="ltr" style="margin-top:6px;font-weight:700;letter-spacing:.04em">Made By <span style="color:var(--accent);font-weight:900">Abdelrhman Safwat</span></div></footer>
 
 <script>
 "use strict";
@@ -119,11 +119,35 @@ const allSemesters=()=>{const extra=lsGet("sahli-semesters",[]);const base=SEMES
 const allSubjects=()=>{const extra=lsGet("sahli-local-subjects",[]);const base=SUBJECTS.filter(s=>!extra.some(e=>e.slug===s.slug));return [...base,...extra]};
 const cohortLabel=()=>lsGet("sahli-cohort","سنة تانية · دفعة PT13");
 const adminName=()=>{try{return sessionStorage.getItem("sahli-admin-name")||""}catch{return""}};
-/* تسجيل زيارة (صفحة + وقت) — محليًا + محاولة رفع لجدول visits في Supabase */
+/* موقع الزائر التقريبي: المتصفح نفسه بيحدد عنوانه العام والمدينة/الدولة
+   عبر خدمة IP-geolocation مجانية (ipwho.is، وبديلها ipapi.co) مرة واحدة
+   في الجلسة وبيخزّن النتيجة في sessionStorage. أي فشل (حجب/شبكة) بيرجّع
+   قيمًا فارغة وبتتسجل الزيارة من غير موقع بدل ما تضيع. */
+let geoPromise=null;
+function visitorGeo(){
+  if(geoPromise)return geoPromise;
+  geoPromise=(async()=>{
+    const empty={ip:null,city:null,country:null};
+    try{const c=sessionStorage.getItem("sahli-geo");if(c){const p=JSON.parse(c);return{ip:p.ip||null,city:p.city||null,country:p.country||null}}}catch(e){}
+    const fj=async(u)=>{const ct=new AbortController();const t=setTimeout(()=>ct.abort(),4000);try{const r=await fetch(u,{signal:ct.signal});if(!r.ok)return null;return await r.json()}catch(e){return null}finally{clearTimeout(t)}};
+    const s=v=>(typeof v==="string"&&v.trim())?v.trim():null;
+    let geo=empty;
+    const a=await fj("https://ipwho.is/");
+    if(a&&a.success!==false&&s(a.ip))geo={ip:s(a.ip),city:s(a.city),country:s(a.country)};
+    else{const b=await fj("https://ipapi.co/json/");if(b&&s(b.ip))geo={ip:s(b.ip),city:s(b.city),country:s(b.country_name)}}
+    /* النتيجة الفاشلة (من غير IP) لا تُخزَّن — المحاولة الجاية تعيد الطلب */
+    if(geo.ip){try{sessionStorage.setItem("sahli-geo",JSON.stringify(geo))}catch(e){}}
+    return geo;
+  })();
+  return geoPromise;
+}
+/* تسجيل زيارة (صفحة + وقت + IP/موقع الزائر من متصفحه) — محليًا + رفع لجدول visits في Supabase */
 function logVisit(page){
-  const v={page,ip:null,city:null,country:null,created_at:new Date().toISOString()};
-  const arr=lsGet("sahli-visits",[]);arr.push(v);lsSet("sahli-visits",arr.slice(-2000));
-  if(LIVE()&&sb){sb.from("visits").insert({page}).then(()=>{},()=>{})}
+  visitorGeo().then(geo=>{
+    const v={page,ip:geo.ip,city:geo.city,country:geo.country,created_at:new Date().toISOString()};
+    const arr=lsGet("sahli-visits",[]);arr.push(v);lsSet("sahli-visits",arr.slice(-2000));
+    if(LIVE()&&sb){sb.from("visits").insert({page,ip:geo.ip,city:geo.city,country:geo.country}).then(()=>{},()=>{})}
+  });
 }
 /* تسجيل نشاط أدمن باسمه — محليًا + محاولة رفع لجدول activity_log */
 function logActivity(action,kind,subject_slug,item_title){
@@ -314,7 +338,7 @@ const PLATFORM_FEATURES=[
 function toggleFeatures(){featuresOpen=!featuresOpen;render()}
 function featuresHtml(){
   if(!featuresOpen)return"";
-  return `<section class="card" style="margin-top:14px"><div class="row" style="justify-content:space-between"><h3 style="margin:0">ليه سهلي فزيو أحسن من جروب التليجرام؟ 🤔</h3><button class="btn ghost" style="color:#DC2626" onclick="toggleFeatures()" aria-label="إغلاق صندوق المميزات">✕ إغلاق</button></div>
+  return `<section class="card" style="margin-top:14px"><div class="row" style="justify-content:space-between"><h3 style="margin:0">ليه سهّلي فيزيو أحسن من جروب التليجرام؟ 🤔</h3><button class="btn ghost" style="color:#DC2626" onclick="toggleFeatures()" aria-label="إغلاق صندوق المميزات">✕ إغلاق</button></div>
   <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">${PLATFORM_FEATURES.map(f=>`<div class="row" style="background:var(--surface2);border-radius:14px;padding:10px 12px;align-items:flex-start"><span style="font-size:20px">${f[0]}</span><span style="font-weight:700;line-height:1.8">${f[1]}</span></div>`).join("")}</div>
   <button class="btn" style="width:100%;margin-top:12px" onclick="toggleFeatures()">تمام، يلا نذاكر 📚</button></section>`;
 }
@@ -371,11 +395,11 @@ function render(){
    <header class="brand" style="padding:0;overflow:hidden">
      <div style="padding:22px 22px 0">
        <div class="logo-wrap"><span class="logo-ring"></span><span class="logo-ic"><svg width="36" height="36" viewBox="0 0 64 64" aria-hidden="true"><g fill="none"><circle cx="32" cy="13.5" r="5" fill="#0F766E"/><path d="M32 21 C25 29 39 33 32 43" stroke="#0F766E" stroke-width="5" stroke-linecap="round"/><polyline points="10,53 23,53 27,47 32,58 36,53 54,53" stroke="#0D9488" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></g></svg></span></div>
-       <h1 style="margin-top:10px">سهلي فزيو</h1><div dir="ltr" style="text-align:right;opacity:.85;font-weight:700">Sahli Physio</div>
+       <h1 style="margin-top:10px">سهّلي فيزيو</h1><div dir="ltr" style="text-align:right;opacity:.85;font-weight:700">Sahli Physio</div>
        <p style="margin:10px 0 0"><span class="pill" style="background:rgba(255,255,255,.22);color:#fff">🎓 ${esc(cohortLabel())} · كفر الشيخ</span></p>
        <p style="line-height:1.9;margin:10px 0 0">منصة مواد العلاج الطبيعي — اختر السيمستر وادخل على مواده: فيديوهات وريكوردات وملفات وملخصات وأسئلة في مكان واحد</p>
        ${LIVE()?`<p style="margin:8px 0 0;font-size:13px"><span class="live-dot"></span>المحتوى حي — بيتم تحديثه لحظيًا عبر Supabase Realtime</p>`:""}
-       <p style="margin:14px 0 18px;display:flex;flex-wrap:wrap;gap:10px"><button class="btn white" onclick="go('admin')">🔐 صفحة الأدمن</button><button class="btn white" onclick="go('reminders')">⏰ تذكيراتي</button><button class="btn white" id="install-btn" onclick="installApp()" aria-label="أضف إلى الشاشة الرئيسية">📲 أضف إلى الشاشة الرئيسية</button><button class="btn white" onclick="toggleFeatures()" aria-label="مميزات المنصة — ليه سهلي فزيو أحسن من جروب التليجرام؟">؟ المميزات</button></p>
+       <p style="margin:14px 0 18px;display:flex;flex-wrap:wrap;gap:10px"><button class="btn white" onclick="go('admin')">🔐 صفحة الأدمن</button><button class="btn white" onclick="go('reminders')">⏰ تذكيراتي</button><button class="btn white" id="install-btn" onclick="installApp()" aria-label="أضف إلى الشاشة الرئيسية">📲 أضف إلى الشاشة الرئيسية</button><button class="btn white" onclick="toggleFeatures()" aria-label="مميزات المنصة — ليه سهّلي فيزيو أحسن من جروب التليجرام؟">؟ المميزات</button></p>
      </div>
      <img class="hero-img" src="assets/hero.webp" alt="طلاب علاج طبيعي بيذاكروا مع بعض">
    </header>
@@ -540,7 +564,7 @@ function renderAdmin(){
   }
   $app.innerHTML=`
    <button class="btn ghost" onclick="go('home')">→ الرئيسية</button>
-   <h2>🛠️ صفحة الأدمن — سهلي فزيو</h2>
+   <h2>🛠️ صفحة الأدمن — سهّلي فيزيو</h2>
    ${LIVE()
      ? `<div class="note ok">✅ <b>Supabase Realtime مفعّل:</b> القراءة عامة للطلبة، والكتابة للأدمن المسجّل فقط. أي إضافة/تعديل/حذف بيظهر لكل المستخدمين في ثوانٍ عبر Realtime — من غير إعادة رفع أو نشر.</div>`
      : `<div class="note">⚠️ Supabase غير مفعّل بعد: املأ SUPABASE_URL و SUPABASE_ANON_KEY في أول الملف ونفّذ supabase-setup.sql. مؤقتًا الإضافات محلية على جهازك مع تصدير content.json.</div>`}
@@ -830,12 +854,18 @@ function collect(){
     image_url:k==="question"?document.getElementById("a-img").value.trim()||null:null};
 }
 function rowForDb(d){
-  /* الكتابة بنفس أعمدة الجداول الحية: subject_id (uuid) وأسئلة question/answer */
+  /* الكتابة بنفس أعمدة الجداول الحية: subject_id (uuid) وأسئلة question/answer.
+     الحقول النصية الاختيارية (الشرح/الملاحظة، الموضوع، لينك الصورة، نوع
+     الملف) بتتبعت كنص فاضي "" مش null: جداول Supabase الحية اتعملت أصلًا
+     بأعمدة NOT NULL (مثل videos.description)، فبعت null لما الأدمن يسيب
+     «شرح / ملاحظة» فاضي كان بيوقع الحفظ كله برسالة
+     «null value in column "description" violates not-null constraint». */
+  const txt=v=>(v===null||v===undefined)?"":v;
   const sid=subjectIdBySlug[d.subject_slug]||null;
-  if(d.kind==="video"){const tg=tgPost(d.url);return {subject_id:sid,title:d.title,url:tg?("https://t.me/"+tg):d.url,description:d.description}}
-  if(d.kind==="recording")return {subject_id:sid,title:d.title,url:d.url,file_category:d.file_category||"lecture",description:d.description};
-  if(d.kind==="file"||d.kind==="summary")return {subject_id:sid,title:d.title,url:d.url,file_type:d.file_type,file_category:d.file_category||"lecture",description:d.description};
-  return {subject_id:sid,question:d.question_text,answer:d.answer_text,topic:d.topic||null,image_url:d.image_url||null,description:d.description};
+  if(d.kind==="video"){const tg=tgPost(d.url);return {subject_id:sid,title:d.title,url:tg?("https://t.me/"+tg):d.url,description:txt(d.description)}}
+  if(d.kind==="recording")return {subject_id:sid,title:d.title,url:d.url,file_category:d.file_category||"lecture",description:txt(d.description)};
+  if(d.kind==="file"||d.kind==="summary")return {subject_id:sid,title:d.title,url:d.url,file_type:txt(d.file_type),file_category:d.file_category||"lecture",description:txt(d.description)};
+  return {subject_id:sid,question:d.question_text,answer:txt(d.answer_text),topic:txt(d.topic),image_url:txt(d.image_url),description:txt(d.description)};
 }
 async function saveItem(){
   const d=collect(),err=document.getElementById("a-err");
@@ -894,7 +924,7 @@ async function deleteItem(kind,id){
   saveLocal(localItems().filter(i=>!(i.kind===kind&&i.id===id)));render();
 }
 function exportJson(){
-  const data={platform:"سهلي فزيو — Sahli Physio",version:2,items:allItems()};
+  const data={platform:"سهّلي فيزيو — Sahli Physio",version:2,items:allItems()};
   const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));
   a.download="content.json";a.click();URL.revokeObjectURL(a.href);
@@ -918,10 +948,12 @@ function suggestHtml(s){
    <select id="sg-filecat"><option value="lecture">📚 محاضرة</option><option value="section">🧪 سكشن (عملي)</option></select></div>
    <div id="sg-title-wrap"><label for="sg-title">العنوان *</label><input id="sg-title" maxlength="300" placeholder="عنوان المصدر"></div>
    <div id="sg-url-wrap"><label for="sg-url">اللينك *</label><input id="sg-url" dir="ltr" style="text-align:left" maxlength="2000" placeholder="https://..."></div>
+   <div id="sg-upload-wrap"><label for="sg-file">⬆️ أو ارفع المحتوى من جهازك (PDF / Word / PowerPoint / صور / ملف صوت / فيديو / أي ملف)</label><input id="sg-file" type="file" onchange="suggestFileChosen(this)"><p id="sg-upload-status" class="meta">الملف بيترفع على تخزين Supabase (مجلد اقتراحات الزوار في باكت sahli-files — قسم 16 في supabase-setup.sql) ولينكه العام بيتحط في خانة اللينك تلقائيًا، فمش لازم تلصق أي لينك. الحد الأقصى ١٢ ميجا للملف.</p></div>
    <div id="sg-q-wrap" style="display:none"><label for="sg-q">السؤال *</label><textarea id="sg-q" rows="3" maxlength="2000"></textarea>
    <label for="sg-a">الإجابة *</label><textarea id="sg-a" rows="3" maxlength="4000"></textarea>
    <label for="sg-topic">الموضوع (اختياري)</label><input id="sg-topic" maxlength="120" placeholder="مثال: التشريح">
-   <label for="sg-img">لينك صورة (اختياري)</label><input id="sg-img" dir="ltr" style="text-align:left" maxlength="2000" placeholder="https://..."></div>
+   <label for="sg-img">لينك صورة (اختياري)</label><input id="sg-img" dir="ltr" style="text-align:left" maxlength="2000" placeholder="https://...">
+   <label for="sg-imgfile">⬆️ أو ارفع صورة السؤال من جهازك</label><input id="sg-imgfile" type="file" accept="image/*" onchange="suggestImageChosen(this)"><p id="sg-img-upload-status" class="meta"></p></div>
    <label for="sg-name">اسمك (اختياري)</label><input id="sg-name" maxlength="60" placeholder="اسم المقترح">
    <p id="sg-err" style="color:#DC2626;font-weight:700"></p>
    <div class="row"><button class="btn" onclick="sendSuggestion('${s.slug}')">📩 إرسال الاقتراح</button>
@@ -931,7 +963,43 @@ function toggleSuggest(on){suggestOpen=on;render()}
 function sgKindChanged(){
   const k=document.getElementById("sg-kind").value;
   const show=(id,on)=>{document.getElementById(id).style.display=on?"":"none"};
-  show("sg-title-wrap",k!=="question"); show("sg-url-wrap",k!=="question"); show("sg-q-wrap",k==="question"); show("sg-filecat-wrap",k==="file"||k==="recording"||k==="summary");
+  show("sg-title-wrap",k!=="question"); show("sg-url-wrap",k!=="question"); show("sg-upload-wrap",k!=="question"); show("sg-q-wrap",k==="question"); show("sg-filecat-wrap",k==="file"||k==="recording"||k==="summary");
+}
+/* ---------------- رفع محتوى يدوي من جهاز الزائر (شارك وساعد) ----------------
+   الزائر يختار ملف من جهازه (محتوى للمصدر المقترح أو صورة لسؤال) فيترفع
+   على Supabase Storage في مجلد «suggestions/» جوه باكت sahli-files،
+   واللينك العام اللي بيرجع بيتحط تلقائيًا في خانة اللينك أو لينك صورة
+   السؤال — من غير ما الزائر يلصق أي لينك خارجي. الرفع بيتم بالمفتاح
+   القابل للنشر (anon) من غير أي تسجيل دخول، وسياسة التخزين بتسمح
+   للزوار بالإدراج في مجلد suggestions/ بس (قسم 16 في
+   supabase-setup.sql) — مفيش تعديل ولا حذف للزوار، والقراءة عامة
+   أصلًا من قسم 13. الاقتراح نفسه بيتبعت بعد كده للأدمن للمراجعة. */
+const VISITOR_MAX_UPLOAD_BYTES=12*1024*1024;
+async function visitorUploadToStorage(file,statusEl){
+  if(!LIVE()||!sb){statusEl.textContent="الرفع محتاج اتصال Supabase مفعّل في النسخة دي — حط لينك للمحتوى بدل الرفع";return null}
+  if(file.size>VISITOR_MAX_UPLOAD_BYTES){statusEl.textContent="حجم الملف أكبر من ١٢ ميجا — ارفع ملف أصغر أو حط لينك خارجي للملف";return null}
+  statusEl.textContent="بيرفع الملف...";
+  const safe=file.name.replace(/[^\w.\-]+/g,"_").slice(-80)||"file";
+  const path="suggestions/"+Date.now()+"-"+Math.random().toString(36).slice(2,8)+"-"+safe;
+  const up=await sb.storage.from(STORAGE_BUCKET).upload(path,file,{upsert:false});
+  if(up.error){statusEl.textContent="فشل الرفع: "+up.error.message+" — تأكد إن قسم 16 من ملف supabase-setup.sql اتنفذ مرة واحدة في Supabase (بيسمح للزوار بالرفع في مجلد الاقتراحات)";return null}
+  return sb.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+async function suggestFileChosen(input){
+  const f=input.files&&input.files[0]; input.value=""; if(!f)return;
+  const st=document.getElementById("sg-upload-status");
+  const url=await visitorUploadToStorage(f,st); if(!url)return;
+  document.getElementById("sg-url").value=url;
+  const t=document.getElementById("sg-title");
+  if(t&&!t.value.trim())t.value=f.name.replace(/\.[^.]+$/,"");
+  st.textContent="تم رفع الملف ✓ ولينكه اتحط في خانة اللينك — راجع العنوان وبعدين اضغط «إرسال الاقتراح»";
+}
+async function suggestImageChosen(input){
+  const f=input.files&&input.files[0]; input.value=""; if(!f)return;
+  const st=document.getElementById("sg-img-upload-status");
+  const url=await visitorUploadToStorage(f,st); if(!url)return;
+  document.getElementById("sg-img").value=url;
+  st.textContent="تم رفع الصورة ✓ ولينكها اتحط في خانة لينك الصورة";
 }
 async function sendSuggestion(slug){
   const k=document.getElementById("sg-kind").value, err=document.getElementById("sg-err");
@@ -950,7 +1018,7 @@ async function sendSuggestion(slug){
   if(k==="summary"&&!d.title){err.textContent="اكتب عنوان الملخص";return}
   if(k==="question"&&(!d.question_text||!d.answer_text)){err.textContent="اكتب السؤال والإجابة";return}
   if(LIVE()&&sb){
-    const {error}=await sb.from("suggestions").insert({subject_id:subjectIdBySlug[slug]||null,subject_slug:slug,kind:k,title:k==="question"?"":d.title,url:d.url,file_category:d.file_category||"lecture",question:d.question_text,answer:d.answer_text,topic:d.topic,image_url:d.image_url,suggester_name:d.suggester_name});
+    const {error}=await sb.from("suggestions").insert({subject_id:subjectIdBySlug[slug]||null,subject_slug:slug,kind:k,title:k==="question"?"":d.title,url:d.url,file_category:d.file_category||"lecture",question:d.question_text||"",answer:d.answer_text||"",topic:d.topic||"",image_url:d.image_url||"",suggester_name:d.suggester_name});
     if(error){err.textContent="فشل الإرسال: "+error.message+" (جدول الاقتراحات بيتنشأ من قسم 7 في supabase-setup.sql)";return}
   } else {
     const arr=lsGet("sahli-suggestions",[]); arr.unshift({id:Date.now(),status:"pending",created_at:new Date().toISOString(),...d}); lsSet("sahli-suggestions",arr);
@@ -1251,11 +1319,11 @@ function showInstallSteps(){
   let ov=document.getElementById("install-steps");
   if(!ov){ov=document.createElement("div");ov.id="install-steps";document.body.appendChild(ov)}
   const steps=deviceIsIOS()
-    ? `<li>افتح الموقع في متصفح <b>سفاري</b>.</li><li>اضغط زرار <b>المشاركة</b> (المربع اللي فيه سهم طالع لفوق) تحت في سفاري.</li><li>اختر <b>«إضافة إلى الشاشة الرئيسية»</b> من القائمة.</li><li>اضغط <b>«إضافة»</b> — هتلاقي أيقونة سهلي فزيو على شاشتك وبتفتح زي التطبيقات.</li>`
-    : `<li>افتح قائمة المتصفح <b>⋮</b> من فوق.</li><li>اختر <b>«تثبيت التطبيق»</b> أو <b>«إضافة إلى الشاشة الرئيسية»</b>.</li><li>أكّد الإضافة — هتلاقي أيقونة سهلي فزيو على شاشتك وبتفتح زي التطبيقات.</li>`;
+    ? `<li>افتح الموقع في متصفح <b>سفاري</b>.</li><li>اضغط زرار <b>المشاركة</b> (المربع اللي فيه سهم طالع لفوق) تحت في سفاري.</li><li>اختر <b>«إضافة إلى الشاشة الرئيسية»</b> من القائمة.</li><li>اضغط <b>«إضافة»</b> — هتلاقي أيقونة سهّلي فيزيو على شاشتك وبتفتح زي التطبيقات.</li>`
+    : `<li>افتح قائمة المتصفح <b>⋮</b> من فوق.</li><li>اختر <b>«تثبيت التطبيق»</b> أو <b>«إضافة إلى الشاشة الرئيسية»</b>.</li><li>أكّد الإضافة — هتلاقي أيقونة سهّلي فيزيو على شاشتك وبتفتح زي التطبيقات.</li>`;
   ov.innerHTML=`<div style="position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;padding:16px" onclick="if(event.target===this)document.getElementById('install-steps').style.display='none'">
     <div class="card" style="max-width:440px;width:100%;margin:0">
-      <h3>📲 أضف سهلي فزيو إلى الشاشة الرئيسية</h3>
+      <h3>📲 أضف سهّلي فيزيو إلى الشاشة الرئيسية</h3>
       <ol style="padding-inline-start:22px;line-height:2;font-weight:700;color:var(--dim)">${steps}</ol>
       <button class="btn" style="width:100%" onclick="document.getElementById('install-steps').style.display='none'">تمام، فهمت</button>
     </div></div>`;

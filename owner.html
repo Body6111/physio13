@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex,nofollow" />
-<title>صفحة الإدارة — سهلي فزيو</title>
+<title>صفحة الإدارة — سهّلي فيزيو</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='16' fill='%230F766E'/><circle cx='32' cy='13.5' r='5' fill='white'/><path d='M32 21 C25 29 39 33 32 43' stroke='white' stroke-width='5' stroke-linecap='round' fill='none'/><polyline points='10,53 23,53 27,47 32,58 36,53 54,53' stroke='%235EEAD4' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/></svg>" />
 <style>
   :root{--bg:#F7F5F0;--surface:#fff;--surface2:#EFF6F4;--text:#1A2E2A;--dim:#6B7C78;--border:#DEE8E4;--accent:#0F766E}
@@ -122,7 +122,7 @@ async function show(){
    <section class="card"><h3>📄 الزيارات لكل صفحة / مادة</h3>${Object.keys(perPage).length?rows(perPage):'<p class="meta">لسه مفيش زيارات متسجلة.</p>'}</section>
    <section class="card"><h3>📅 الزيارات لكل يوم</h3>${Object.keys(perDay).length?rows(perDay,k=>new Date(k+"T00:00:00").toLocaleDateString("ar-EG",{weekday:"long",day:"numeric",month:"long"})):'<p class="meta">لسه مفيش زيارات.</p>'}</section>
    <section class="card"><h3>🗺️ الزيارات حسب المدينة / الدولة (من الـ IP)</h3>
-     ${Object.keys(perCity).length?rows(perCity):'<p class="meta">بيانات المدينة/الدولة غير متاحة في الزيارات المتسجلة حاليًا (الـ IP لا يصل من المتصفح ولا من بيئة التشغيل الحالية).</p>'}
+     ${Object.keys(perCity).length?rows(perCity):'<p class="meta">لسه مفيش زيارات بموقع مسجّل — متصفح كل زائر بيحدد عنوانه العام ومدينته/دولته التقريبية وقت الزيارة وبيتبعتوا مع تسجيلها، فالزيارات الجديدة هتظهر هنا بمكانها. زيارة ممكن تتسجل من غير موقع لو خدمة تحديد الموقع كانت محجوبة عند الزائر.</p>'}
      <div class="warn">⚠️ تنبيه: الـ IP عنوان شبكة مش هوية شخص — ممكن يتشارك بين ناس كتير أو يتغير مع باقات الموبايل والـ VPN. والمكان المشتق منه تقريبي (غالبًا مكان شركة الإنترنت)، مش عنوان دقيق ولا GPS.</div>
    </section>
    <section class="card"><h3>🧾 أحدث الزيارات</h3>
