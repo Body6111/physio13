@@ -5,7 +5,7 @@
    فالمحتوى يفضل محدّث لحظيًا. وكمان بيستقبل إشعارات الدفع
    (Web Push) اللي الأدمن بيبعتها من صفحة الأدمن وبيعرضها على
    الموبايل حتى والموقع مقفل تمامًا. */
-const CACHE = "sahli-physio-v2";
+const CACHE = "sahli-physio-v3";
 const CORE = [
   "./",
   "./index.html",
@@ -55,17 +55,24 @@ self.addEventListener("fetch", (event) => {
     );
     return;
   }
-  // الملفات الثابتة: كاش أولًا، وتتحدث في الخلفية
+  // الملفات الثابتة: الكاش فورًا للسرعة، وطلب شبكة في الخلفية بيحدّث
+  // الكاش (stale-while-revalidate حقيقي) عشان أي ملف اتغيّر على السيرفر
+  // يوصل للنسخة المثبّتة عند الفتح اللي بعده من غير ما تستنى تغيير رقم
+  // نسخة الكاش — وده جزء من إصلاح «الموقع المثبّت ما بيتحدّثش»
   event.respondWith(
-    caches.match(req).then(
-      (hit) =>
-        hit ||
-        fetch(req).then((res) => {
+    caches.match(req).then((hit) => {
+      const network = fetch(req)
+        .then((res) => {
           const copy = res.clone();
-          caches.open(CACHE).then((cache) => cache.put(req, copy));
-          return res;
+          return caches
+            .open(CACHE)
+            .then((cache) => cache.put(req, copy))
+            .then(() => res);
         })
-    )
+        .catch(() => hit);
+      event.waitUntil(network.catch(() => {}));
+      return hit || network;
+    })
   );
 });
 

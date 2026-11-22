@@ -182,6 +182,7 @@ let adminUnlocked=false;     // بوابة كود الأدمن (التحقق م�
 /* رسالة موحّدة لما الكود يفتح الأدمن للعرض لكن جلسة الكتابة مش شغالة */
 const WRITE_SESSION_MSG="الكتابة مش مفعّلة لسه: جلسة أدمن Supabase مش شغالة. التفعيل بيتم مرة واحدة بس — نفّذ قسم 12 من ملف supabase-setup.sql في Supabase (SQL Editor)، وبعدين اقفل الأدمن وادخل بالكود من جديد، وهتشتغل الإضافة والتعديل والحذف بالكود بس.";
 let view={name:"home"};
+let liveInitDone=false, safetyTimer=null, lastAutoRefresh=0;
 let semConfirmPending=false;
 let announcementText="";
 let annPending=null, annConfirmPending=false, annClearPending=false;
@@ -284,8 +285,10 @@ async function load(){
         .on("postgres_changes",{event:"*",schema:"public",table:"questions"},async()=>{await fetchAllLive(); if(view.name!=="admin")render()})
         .on("postgres_changes",{event:"*",schema:"public",table:"site_settings"},async()=>{await fetchAllLive(); if(view.name!=="admin")render()})
         .subscribe();
-      // شبكة أمان: تحديث دوري خفيف لو اتصال Realtime وقع
-      setInterval(async()=>{try{const before=JSON.stringify(published);await fetchAllLive();
+      liveInitDone=true;
+      // شبكة أمان: تحديث دوري خفيف لو اتصال Realtime وقع (مرة واحدة بس
+      // حتى لو load() اتنادت تاني عند رجوع النت)
+      if(!safetyTimer)safetyTimer=setInterval(async()=>{try{const before=JSON.stringify(published);await fetchAllLive();
         if(JSON.stringify(published)!==before&&view.name!=="admin")render()}catch(e){}},30000);
       render(); return;
     }
@@ -297,6 +300,23 @@ async function load(){
   try{const r=await fetch("content.json",{cache:"default"}); if(r.ok){const d=await r.json(); published=Array.isArray(d)?d:(d.items||[]);}}catch(e){published=[]}
   render();
 }
+/* ---------------- تحديث تلقائي أول ما النت يرجع ----------------
+   المشكلة اللي بتقابل الطالب على الموبايل: يفتح التطبيق المثبّت والنت
+   مقطوع، فيفشل تحميل مكتبة Supabase أو البيانات، والموقع يفضل واقف على
+   النسخة الفاضية/القديمة لحد ما يعمل ريفريش يدوي. الحل: أول ما الاتصال
+   يرجع (حدث online) أو التطبيق يرجع للواجهة وفيه نت، نعيد التحميل فورًا:
+   لو التحميل الحي ما كملش أصلًا نعيد load() كلها (فتُعاد محاولة تحميل
+   المكتبة والبيانات)، ولو كان شغال نعيد جلب البيانات ونرسم من جديد. */
+async function refreshNow(force){
+  if(!LIVE())return;
+  const now=Date.now();
+  if(!force&&now-lastAutoRefresh<5000)return;
+  lastAutoRefresh=now;
+  if(!liveInitDone){await load();return}
+  try{await fetchAllLive(); if(view.name!=="admin")render()}catch(e){}
+}
+window.addEventListener("online",()=>{refreshNow(true)});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&navigator.onLine)refreshNow(false)});
 function counts(slug){const l=bySubject(slug);return{v:l.filter(i=>i.kind==="video").length,r:l.filter(i=>i.kind==="recording").length,f:l.filter(i=>i.kind==="file").length,s:l.filter(i=>i.kind==="summary").length,q:l.filter(i=>i.kind==="question").length}}
 /* ---------------- متتبع المذاكرة: تقدم الطالب في localStorage (من غير تسجيل دخول) ---------------- */
 const doneKeys=()=>lsGet("sahli-progress",[]);
@@ -455,7 +475,7 @@ function render(){
   cdTick();
   studyChipRender();
 }
-function bannerHtml(){return announcementText?`<div class="card" style="border:2px solid #F59E0B;background:#FFFBEB;margin-bottom:12px"><strong>📢 ${esc(announcementText)}</strong></div>`:""}
+function bannerHtml(){return announcementText?`<div class="card" role="region" aria-label="إعلان من إدارة المنصة" style="border:2px solid #B45309;background:#F59E0B;color:#451A03;margin-bottom:12px;box-shadow:0 4px 14px rgba(180,83,9,.35)"><strong>📢 ${esc(announcementText)}</strong></div>`:""}
 function openSemester(slug){view={name:"semester",slug};render()}
 function renderSemester(){
   const sem=allSemesters().find(s=>s.slug===view.slug)||allSemesters()[0];
@@ -1599,7 +1619,20 @@ function showInstallSteps(){
   ov.style.display="";
 }
 if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
-  window.addEventListener("load",()=>{navigator.serviceWorker.register("./sw.js").catch(()=>{})});
+  /* لو نسخة أحدث من الـ Service Worker سيطرت على الصفحة المفتوحة (بعد
+     تحديث الموقع)، نعيد التحميل مرة واحدة بس عشان الطالب يشوف الجديد
+     من غير ريفريش يدوي — والحارس بيمنع إعادة التحميل عند أول تثبيت */
+  const hadController=!!navigator.serviceWorker.controller;
+  let swReloaded=false;
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{
+    if(!hadController||swReloaded)return; swReloaded=true; location.reload();
+  });
+  window.addEventListener("load",()=>{
+    navigator.serviceWorker.register("./sw.js").then(reg=>{
+      /* أول ما النت يرجع نسأل عن تحديث للـ Service Worker نفسه */
+      window.addEventListener("online",()=>{reg.update().catch(()=>{})});
+    }).catch(()=>{});
+  });
 }
 studyChipRender();
 load();
