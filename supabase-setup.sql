@@ -550,3 +550,127 @@ create policy "visitor insert suggestion uploads" on storage.objects
     bucket_id = 'sahli-files'
     and (storage.foldername(name))[1] = 'suggestions'
   );
+
+-- ---------- 17) ترتيب عرض المحتوى (sort_order) ----------
+-- الأدمن يرتّب عناصر «المحتوى الحي» من صفحة الأدمن بأزرار ↑ ↓، والترتيب
+-- بيتحفظ هنا وينعكس على ترتيب ظهور المحتوى للطلاب في صفحة المادة.
+-- العمود بيضاف للجداول الخمسة، والقيم الحالية بتتعبّى بـ ‎-id‎ عشان
+-- ترتيب العرض الحالي (الأحدث أولًا) يفضل زي ما هو بالظبط أول مرة.
+-- مفيش سياسات جديدة: القراءة العامة والتعديل للأدمن المسجّل موجودين
+-- أصلًا وبيغطوا العمود الجديد تلقائيًا.
+-- نفّذ القسم ده مرة واحدة في SQL Editor على المشروع الحي.
+alter table public.videos    add column if not exists sort_order bigint;
+alter table public.recordings add column if not exists sort_order bigint;
+alter table public.files     add column if not exists sort_order bigint;
+alter table public.summaries add column if not exists sort_order bigint;
+alter table public.questions add column if not exists sort_order bigint;
+update public.videos    set sort_order = -id where sort_order is null;
+update public.recordings set sort_order = -id where sort_order is null;
+update public.files     set sort_order = -id where sort_order is null;
+update public.summaries set sort_order = -id where sort_order is null;
+update public.questions set sort_order = -id where sort_order is null;
+
+-- ---------- 18) إشعارات الدفع (Web Push) لموبايلات الطلاب ----------
+-- الأدمن يبعت إشعارًا (عنوان + نص، زي الإعلان) من صفحة الأدمن فيوصل
+-- لموبايلات الطلاب المشتركين حتى والموقع مقفل. المعمارية مجانية
+-- بالكامل: اشتراكات الطلاب بتتحفظ في الجدول ده، والإرسال بيتم من
+-- دالة Supabase Edge Function اسمها send-push بمفاتيح VAPID.
+--
+-- خطوات التشغيل الحي (مرة واحدة، بالترتيب):
+-- 1) نفّذ القسم ده في SQL Editor (بيعمل الجدول والسياسات بس).
+-- 2) ولّد زوج مفاتيح VAPID مجانًا من أي جهاز عليه Node:
+--      npx web-push generate-vapid-keys
+--    هيطلع Public Key وPrivate Key.
+-- 3) المفتاح العام (Public) بيتحط في مكانين بنفس القيمة:
+--    أ) في github-pages/index.html مكان قيمة VAPID_PUBLIC_KEY الفاضية
+--       (وبعدها إعادة رفع الملف على GitHub).
+--    ب) في صفحة أدمن المنصة الرئيسية (قسم «إشعارات الموبايل»).
+--    والمفتاح الخاص (Private) بيتحط في مكانين بس ومش بيظهر في أي
+--    ملف موقع أبدًا: سرّ في الدالة (خطوة 4) وإعدادات المنصة الرئيسية.
+-- 4) أنشئ الدالة: من لوحة Supabase ← Edge Functions ← Deploy a new
+--    function ← الاسم: send-push ← الصق كود الدالة اللي تحت (بين
+--    علامتي BEGIN/END FUNCTION) ← Deploy. وبعدين من إعدادات الدالة
+--    (Secrets) ضيف 3 أسرار:
+--      VAPID_PUBLIC_KEY  = المفتاح العام من خطوة 2
+--      VAPID_PRIVATE_KEY = المفتاح الخاص من خطوة 2
+--      VAPID_SUBJECT     = https://body6111.github.io/sahli-physio/
+--    (SUPABASE_URL وSUPABASE_SERVICE_ROLE_KEY بيبقوا موجودين تلقائيًا
+--    لأي دالة — مش محتاج تضيفهم.)
+--    ملحوظة: جوّه كود الدالة فيه ثابت ADMIN_UUID — حط مكانه UUID
+--    حساب الأدمن المشترك (7e59e11b-ff1b-4de8-9d46-a828f2945a0e)
+--    عشان الدالة ترفض أي إرسال مش جاي من جلسة الأدمن نفسها.
+-- 5) جرّب: افتح الموقع من موبايل، فعّل الإشعارات من كارت «إشعارات
+--    الموبايل» في الرئيسية، وبعدين ابعت إشعار تجريبي من صفحة الأدمن.
+--    على آيفون: الإشعارات بتشتغل بس بعد إضافة الموقع للشاشة
+--    الرئيسية وفتحه من الأيقونة (قاعدة أبل، iOS 16.4+).
+--
+-- السياسات: أي زائر يقدر يشترك (insert) بس — محدش يقدر يقرأ قائمة
+-- الاشتراكات إلا الأدمن المسجّل (والدالة بالسيرفس رول)، فعناوين
+-- أجهزة الطلاب مش مكشوفة لحد. الاشتراكات الميتة بتتمسح تلقائيًا
+-- من الدالة لما خدمة الدفع ترجّع 404/410.
+create table if not exists public.push_subscriptions (
+  id bigint generated always as identity primary key,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.push_subscriptions enable row level security;
+
+drop policy if exists "push subscribe" on public.push_subscriptions;
+create policy "push subscribe" on public.push_subscriptions
+  for insert to anon, authenticated with check (true);
+
+drop policy if exists "push admin manage" on public.push_subscriptions;
+create policy "push admin manage" on public.push_subscriptions
+  for all to authenticated using (true) with check (true);
+
+grant insert on public.push_subscriptions to anon;
+grant select, insert, update, delete on public.push_subscriptions to authenticated;
+grant all on public.push_subscriptions to service_role;
+
+-- ===== BEGIN FUNCTION: كود دالة send-push (TypeScript لـ Deno) =====
+-- import webpush from "npm:web-push@3.6.7";
+-- import { createClient } from "npm:@supabase/supabase-js@2";
+--
+-- const ADMIN_UUID = "7e59e11b-ff1b-4de8-9d46-a828f2945a0e";
+--
+-- Deno.serve(async (req) => {
+--   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+--   const authHeader = req.headers.get("Authorization") || "";
+--   const admin = createClient(
+--     Deno.env.get("SUPABASE_URL")!,
+--     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+--     { global: { headers: { Authorization: authHeader } } }
+--   );
+--   const { data: userData } = await admin.auth.getUser();
+--   if (!userData?.user || userData.user.id !== ADMIN_UUID) {
+--     return Response.json({ error: "unauthorized" }, { status: 401 });
+--   }
+--   const { title, body } = await req.json().catch(() => ({}));
+--   if (!title || !body) return Response.json({ error: "title and body are required" }, { status: 400 });
+--   webpush.setVapidDetails(
+--     Deno.env.get("VAPID_SUBJECT") || "https://body6111.github.io/sahli-physio/",
+--     Deno.env.get("VAPID_PUBLIC_KEY")!,
+--     Deno.env.get("VAPID_PRIVATE_KEY")!
+--   );
+--   const svc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+--   const { data: subs } = await svc.from("push_subscriptions").select("*");
+--   let sent = 0, failed = 0;
+--   for (const s of subs || []) {
+--     try {
+--       await webpush.sendNotification(
+--         { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+--         JSON.stringify({ title, body, url: "./" })
+--       );
+--       sent++;
+--     } catch (e) {
+--       failed++;
+--       const code = (e as { statusCode?: number })?.statusCode;
+--       if (code === 404 || code === 410) await svc.from("push_subscriptions").delete().eq("id", s.id);
+--     }
+--   }
+--   return Response.json({ ok: true, sent, failed, total: (subs || []).length });
+-- });
+-- ===== END FUNCTION =====

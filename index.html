@@ -81,6 +81,14 @@
    ===================================================================== */
 const SUPABASE_URL = "https://hxfmjsqclyveuenquivj.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_OCCYtuz890QNDy9GpkBarg_CqjhCbt5";
+/* مفتاح VAPID العام لإشعارات الدفع (Web Push) — صاحب الموقع بيحط
+   القيمة هنا بعد توليد زوج المفاتيح (npx web-push generate-vapid-keys)
+   وبعد تنفيذ قسم 18 في supabase-setup.sql ونشر دالة send-push.
+   طول ما القيمة فاضية، كارت الإشعارات بيقول للطلاب «هتتفعّل قريب»
+   وصفحة الأدمن بتعرض خطوات التشغيل — المفتاح العام آمن يظهر هنا
+   (هو معمول للعلن أصلًا)، أما المفتاح الخاص فمش بيتحط في أي ملف
+   موقع: بيتحفظ سرًّا في الدالة وفي إعدادات المنصة الرئيسية بس */
+const VAPID_PUBLIC_KEY = "BEK_DTMNtKXqXoo25weSO5V9aaw4UsYioP5b2w8Ytg0dwEMIEHU0a3tBEA5cZU2tOrxqVLtoAMN4YrsUK-9fYsw";
 /* دخول الأدمن بالكود بس — من غير إيميل ولا باسورد في الصفحة.
    ملحوظة أمان: الكود نفسه مش مكتوب في الملف ده خالص — التحقق بيتم
    على السيرفر عبر دالة Supabase RPC اسمها check_admin_code (قسم 6 في
@@ -129,21 +137,32 @@ function visitorGeo(){
   geoPromise=(async()=>{
     const empty={ip:null,city:null,country:null};
     try{const c=sessionStorage.getItem("sahli-geo");if(c){const p=JSON.parse(c);return{ip:p.ip||null,city:p.city||null,country:p.country||null}}}catch(e){}
-    const fj=async(u)=>{const ct=new AbortController();const t=setTimeout(()=>ct.abort(),4000);try{const r=await fetch(u,{signal:ct.signal});if(!r.ok)return null;return await r.json()}catch(e){return null}finally{clearTimeout(t)}};
+    const fj=async(u)=>{const ct=new AbortController();const t=setTimeout(()=>ct.abort(),3000);try{const r=await fetch(u,{signal:ct.signal});if(!r.ok)return null;return await r.json()}catch(e){return null}finally{clearTimeout(t)}};
     const s=v=>(typeof v==="string"&&v.trim())?v.trim():null;
     let geo=empty;
+    /* ٣ خدمات مجانية بالترتيب: فشل أو تحديد معدل (rate limit) في واحدة
+       — بيحصل متقطعًا خصوصًا ورا NAT مشترك — بيجرّب اللي بعدها فورًا */
     const a=await fj("https://ipwho.is/");
     if(a&&a.success!==false&&s(a.ip))geo={ip:s(a.ip),city:s(a.city),country:s(a.country)};
-    else{const b=await fj("https://ipapi.co/json/");if(b&&s(b.ip))geo={ip:s(b.ip),city:s(b.city),country:s(b.country_name)}}
+    else{const b=await fj("https://ipapi.co/json/");
+      if(b&&s(b.ip))geo={ip:s(b.ip),city:s(b.city),country:s(b.country_name)};
+      else{const c=await fj("https://freeipapi.com/api/json/");if(c&&s(c.ipAddress))geo={ip:s(c.ipAddress),city:s(c.cityName),country:s(c.countryName)}}}
     /* النتيجة الفاشلة (من غير IP) لا تُخزَّن — المحاولة الجاية تعيد الطلب */
     if(geo.ip){try{sessionStorage.setItem("sahli-geo",JSON.stringify(geo))}catch(e){}}
     return geo;
   })();
+  /* نتيجة فاضية (الخدمة محجوبة/بطيئة) لا تتلزّق طول الجلسة: الزيارة
+     الجاية تعيد المحاولة بدل ما كل زيارات الجلسة تطلع «غير متاح» */
+  geoPromise.then(g=>{if(!g.ip)geoPromise=null});
   return geoPromise;
 }
-/* تسجيل زيارة (صفحة + وقت + IP/موقع الزائر من متصفحه) — محليًا + رفع لجدول visits في Supabase */
+/* تسجيل زيارة (صفحة + وقت + IP/موقع الزائر من متصفحه) — محليًا + رفع لجدول visits في Supabase.
+   التسجيل بيستنى تحديد الموقع بحد أقصى ٢٫٥ ثانية: أول زيارة في الجلسة
+   بتحمل الـ IP والمدينة والدولة زي اللي بعدها، ولو الخدمة بطيئة أو
+   محجوبة الزيارة تتسجل من غير موقع بدل ما تضيع أو تتأخر */
 function logVisit(page){
-  visitorGeo().then(geo=>{
+  const timeout=new Promise(res=>setTimeout(()=>res({ip:null,city:null,country:null}),2500));
+  Promise.race([visitorGeo(),timeout]).then(geo=>{
     const v={page,ip:geo.ip,city:geo.city,country:geo.country,created_at:new Date().toISOString()};
     const arr=lsGet("sahli-visits",[]);arr.push(v);lsSet("sahli-visits",arr.slice(-2000));
     if(LIVE()&&sb){sb.from("visits").insert({page,ip:geo.ip,city:geo.city,country:geo.country}).then(()=>{},()=>{})}
@@ -170,12 +189,13 @@ let remindOpen=false, rmDelayMin=60, rmUseCustom=false;
 let suggestOpen=false;
 let semPending=null;
 let tab="video", visible=10, editing=null; // editing = {kind,id}
+let confirmDeleteKey=null; // (لم يعد مستخدمًا — تأكيد الحذف بقى بنافذة askConfirm الداخلية)
 const $app=document.getElementById("app");
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const localItems=()=>{try{return JSON.parse(localStorage.getItem(LS_KEY)||"[]")}catch{return[]}};
 const saveLocal=items=>localStorage.setItem(LS_KEY,JSON.stringify(items));
 const allItems=()=>LIVE()?[...published]:[...localItems(),...published];
-const bySubject=slug=>allItems().filter(i=>i.subject_slug===slug);
+const bySubject=slug=>allItems().filter(i=>i.subject_slug===slug).sort(byDisplayOrder);
 const subj=slug=>allSubjects().find(s=>s.slug===slug)||allSubjects()[0];
 const ytId=u=>{const m=String(u||"").match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{6,})/);return m?m[1]:null};
 const tgPost=u=>{const m=String(u||"").match(/(?:t\.me|telegram\.me)\/(?:s\/)?([A-Za-z0-9_]{3,})\/(\d+)/);return (m&&m[1]!=="c")?m[1]+"/"+m[2]:null};
@@ -192,7 +212,12 @@ function unify(kind,row){return {id:row.id,kind,
   title:row.title||(kind==="question"?String(row.question_text||row.question||"").slice(0,300):""),
   url:row.url||null,file_type:row.file_type||null,file_category:row.file_category||"lecture",description:row.description||null,
   question_text:row.question_text||row.question||null,answer_text:row.answer_text||row.answer||null,
-  topic:row.topic||null,image_url:row.image_url||null,created_at:row.created_at}}
+  topic:row.topic||null,image_url:row.image_url||null,sort_order:(typeof row.sort_order==="number"?row.sort_order:null),created_at:row.created_at}}
+
+/* مفتاح ترتيب العرض الفعّال: sort_order المحفوظ، ولو لسه مش موجود
+   (قبل تنفيذ قسم 17 أو لعنصر قديم) يبقى ‎-id‎ = الأحدث أولًا زي العرض الحالي */
+const ordOf=i=>(typeof i.sort_order==="number"&&isFinite(i.sort_order))?i.sort_order:-Number(i.id||0);
+const byDisplayOrder=(a,b)=>ordOf(a)-ordOf(b)||(Number(b.id||0)-Number(a.id||0));
 
 async function fetchAllLive(){
   const [sems,subs,v,f,q]=await Promise.all([
@@ -219,7 +244,7 @@ async function fetchAllLive(){
     ...(f.data||[]).map(r=>unify("file",r)),
     ...sumRows.map(r=>unify("summary",r)),
     ...(q.data||[]).map(r=>unify("question",r))
-  ].sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")));
+  ].sort(byDisplayOrder);
   try{const st=await sb.from("site_settings").select("*").eq("key","announcement").maybeSingle();
     if(!st.error)announcementText=(st.data&&st.data.value)||"";}catch(e){}
   /* جدول الامتحانات (قسم 10 في supabase-setup.sql) — غيابه ما يوقفش باقي الموقع */
@@ -234,6 +259,9 @@ async function fetchAllLive(){
 }
 
 async function load(){
+  /* تحديد موقع الزائر يبدأ فورًا مع فتح الموقع — قبل تحميل المحتوى —
+     عشان أول زيارة في الجلسة تلحق تحمل الـ IP والمدينة زي اللي بعدها */
+  visitorGeo();
   if(LIVE()){
     // تحميل مكتبة supabase-js من CDN (ستاتيك بالكامل — مناسب لـ GitHub Pages)
     await new Promise((res,rej)=>{const s=document.createElement("script");
@@ -331,6 +359,7 @@ const PLATFORM_FEATURES=[
  ["✅","متتبع مذاكرة: علّم بعلامة صح على كل محاضرة وملف ذاكرته، وشريط بيقولك خلصت كام % من كل مادة"],
  ["⏳","عدّاد تنازلي وجدول كامل للامتحانات الجاية (ميدتيرم · عملي · فاينال) عشان تبقى عارف فاضل قد إيه"],
  ["⏰","تذكيرات مذاكرة تنبّهك في وقتها، وعدّاد بيحسب وقت مذاكرتك كل يوم وسلسلة أيام التزامك"],
+ ["🔔","إشعارات موبايل توصلك بأي محاضرة جديدة أو إعلان مهم حتى والموقع مقفل — فعّلها من كارت «إشعارات الموبايل» في الرئيسية (وعلى آيفون لازم تثبيت الموقع على الشاشة الرئيسية الأول)"],
  ["🕶️","اسأل أي سؤال مجهول من غير اسم ومن غير إحراج — الأدمن يجاوب وينشره في الأسئلة المتكررة عشان الكل يستفيد"],
  ["🤝","شارك وساعد: اقترح مصادر ومحاضرات مفيدة لزمايلك من جوه كل مادة"],
  ["📲","ثبّت الموقع على الشاشة الرئيسية لموبايلك من زرار «أضف إلى الشاشة الرئيسية» وهيفتح زي التطبيقات"]
@@ -409,6 +438,7 @@ function render(){
      <input id="home-q" type="search" value="${esc(homeQuery)}" oninput="homeSearch(this.value)" placeholder="🔍 ابحث عن محاضرة أو دكتور أو ملف أو سؤال..." style="border:2px solid var(--border);border-radius:16px;padding:13px 15px;width:100%;background:var(--surface)">
      <div id="home-results">${homeResultsHtml()}</div>
    </section>
+   ${pushCardHtml()}
    ${examsHtml()}
    <h2 style="margin:20px 0 4px">📚 اختر السيمستر</h2>
    <section style="display:flex;flex-direction:column;gap:12px;margin-top:10px">${sems.map((sem,idx)=>{const subs=allSubjects().filter(s=>s.semester===sem.slug);const total=subs.reduce((a,s)=>a+bySubject(s.slug).length,0);return `
@@ -455,7 +485,31 @@ function go(name){view={name};render()}
 function setTab(t){tab=t;visible=10;render()}
 function more(){visible+=10;render()}
 function toggleAns(id){document.getElementById("ans-"+id)?.classList.toggle("open")}
-function playVideo(el,yt){el.innerHTML=`<iframe title="video" src="https://www.youtube-nocookie.com/embed/${yt}?autoplay=1&rel=0" style="width:100%;aspect-ratio:16/9;border:0;border-radius:12px" allow="accelerometer;autoplay;encrypted-media;picture-in-picture" allowfullscreen loading="lazy"></iframe>`}
+/* نافذة تشغيل الفيديو المنبثقة: الضغط على أي فيديو بيفتحه في نافذة جوّه
+   الموقع (يوتيوب بمشغّل مضمّن / تليجرام بالويدجت الرسمية / ملف فيديو
+   مباشر بمشغّل المتصفح / درايف وأي لينك تاني بمعاينة مضمّنة) بدل ما
+   يشتغل مكانه في الكارت أو يودّي الطالب لتبويب جديد */
+function openVideoViewer(el){
+  const url=el.getAttribute("data-url")||"",title=el.getAttribute("data-title")||"";
+  const yt=el.getAttribute("data-yt")||"",tg=el.getAttribute("data-tg")||"";
+  let ov=document.getElementById("viewer-ov");
+  if(!ov){ov=document.createElement("div");ov.id="viewer-ov";document.body.appendChild(ov)}
+  let body="";
+  if(tg){body=`<div id="tg-slot" style="display:flex;justify-content:center;overflow:auto;max-height:76vh;background:var(--surface2)"></div>`}
+  else if(yt){body=`<iframe title="${esc(title)}" src="https://www.youtube-nocookie.com/embed/${yt}?autoplay=1&rel=0" style="width:100%;aspect-ratio:16/9;border:0;background:#000" allow="accelerometer;autoplay;encrypted-media;picture-in-picture" allowfullscreen></iframe>`}
+  else if(/\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i.test(url)){body=`<video controls autoplay src="${esc(url)}" style="width:100%;max-height:70vh;background:#000"></video>`}
+  else{const src=drivePreview(url)||url;body=`<iframe title="${esc(title)}" src="${esc(src)}" style="width:100%;height:70vh;border:0;background:#fff" allow="autoplay;encrypted-media;picture-in-picture" allowfullscreen loading="lazy"></iframe><p class="meta" style="text-align:center;padding:8px">لو الفيديو ما ظهرش، الموقع الأصلي بيمنع العرض جوّه صفحات تانية — استخدم «تبويب جديد» فوق.</p>`}
+  ov.innerHTML=`<div style="position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:12px" onclick="if(event.target===this)closeViewer()">
+    <div class="card" style="width:100%;max-width:760px;max-height:92vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+      <div class="row" style="justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border)"><strong style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎬 ${esc(title)}</strong>
+      <span class="row">${url?`<a class="btn ghost" target="_blank" rel="noopener" href="${esc(url)}">تبويب جديد ↗</a>`:""}<button class="btn ghost" style="color:#DC2626" onclick="closeViewer()">✕ إغلاق</button></span></div>
+      ${body}
+    </div></div>`;
+  if(tg){
+    const slot=document.getElementById("tg-slot");
+    if(slot){const sc=document.createElement("script");sc.async=true;sc.src="https://telegram.org/js/telegram-widget.js?22";sc.setAttribute("data-telegram-post",tg);sc.setAttribute("data-width","100%");slot.appendChild(sc)}
+  }
+}
 /* العارض الداخلي: ملفات PDF وDrive وصور الأسئلة — من غير خروج من الموقع */
 function drivePreview(u){const m=String(u||"").match(/drive\.google\.com\/file\/d\/([\w-]+)/)||String(u||"").match(/drive\.google\.com\/open\?id=([\w-]+)/)||String(u||"").match(/drive\.google\.com\/uc\?[^#]*\bid=([\w-]+)/);return m?("https://drive.google.com/file/d/"+m[1]+"/preview"):null}
 function openViewer(el){
@@ -480,6 +534,135 @@ function openViewer(el){
     </div></div>`;
 }
 function closeViewer(){const ov=document.getElementById("viewer-ov");if(ov)ov.innerHTML=""}
+/* نافذة تأكيد حذف داخلية (modal): كل عمليات الحذف في صفحة الأدمن
+   (المحتوى الحي + رفض الاقتراحات + الامتحانات + الأسئلة المجهولة
+   وردودها) بتتأكد بيها بدل نافذة confirm الأصلية — اللي كانت بتتقفل
+   تلقائيًا في بعض المتصفحات (وفي المتصفح الآلي بتترفض قبل ما تظهر)
+   فالحذف ما كانش بيكمل أبدًا. بترجع Promise بتتحل true بس لو الأدمن
+   ضغط زرار «حذف» الأحمر صراحةً جوّه النافذة */
+let confirmResolve=null;
+function askConfirm(msg,opts){
+  opts=opts||{};
+  const danger=opts.danger!==false;
+  return new Promise(res=>{
+    confirmResolve=res;
+    let ov=document.getElementById("confirm-ov");
+    if(!ov){ov=document.createElement("div");ov.id="confirm-ov";document.body.appendChild(ov)}
+    ov.innerHTML=`<div style="position:fixed;inset:0;z-index:130;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px">
+      <div class="card" style="max-width:400px;width:100%;text-align:center;margin:0">
+        <div style="font-size:34px">${danger?"🗑️":"📣"}</div>
+        <p style="font-weight:800;line-height:1.9;margin-top:6px">${esc(msg)}</p>
+        <p class="meta">${danger?"الحذف نهائي ومش هيتراجع عنه.":"هيوصل لكل الأجهزة المشتركة فورًا."}</p>
+        <div class="row" style="justify-content:center;margin-top:12px">
+          <button class="btn" style="background:${danger?"#DC2626":"var(--accent)"}" onclick="answerConfirm(true)">${esc(opts.label||"🗑 حذف")}</button>
+          <button class="btn ghost" onclick="answerConfirm(false)">إلغاء</button>
+        </div>
+      </div></div>`;
+  });
+}
+function answerConfirm(v){
+  const ov=document.getElementById("confirm-ov"); if(ov)ov.innerHTML="";
+  const r=confirmResolve; confirmResolve=null; if(r)r(v);
+}
+/* رسالة نجاح بتظهر مرة واحدة أعلى صفحة الأدمن بعد أي عملية حذف */
+let adminFlash="";
+/* ---------------- إشعارات الدفع (Web Push) ----------------
+   الطالب يفعّل الإشعارات من كارت في الرئيسية: إذن المتصفح + اشتراك
+   عند خدمة الدفع بمفتاح VAPID العام + حفظ الاشتراك في جدول
+   push_subscriptions في Supabase (قسم 18 في ملف الإعداد). الأدمن
+   يبعت من صفحة الأدمن فدالة send-push توزّع الإشعار على المشتركين
+   كلهم، وبيعرضه الـ Service Worker حتى والموقع مقفل. على آيفون
+   الاشتراك بيشتغل بس من التطبيق المثبّت على الشاشة الرئيسية
+   (قاعدة أبل، iOS 16.4+) — والكارت بيشرح ده للطالب */
+let pushState="checking", pushNote="", pushSubCount=null;
+function urlB64ToUint8Static(base64String){
+  const padding="=".repeat((4-(base64String.length%4))%4);
+  const base64=(base64String+padding).replace(/-/g,"+").replace(/_/g,"/");
+  const raw=window.atob(base64); const out=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);
+  return out;
+}
+function pushCardHtml(){
+  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  let inner="";
+  if(pushState==="checking")inner=`<p class="meta">بنتأكد من دعم جهازك للإشعارات...</p>`;
+  else if(pushState==="unsupported")inner=`<p class="note">المتصفح أو الجهاز ده مش بيدعم إشعارات الدفع — جرّب كروم على أندرويد، أو ثبّت الموقع على الشاشة الرئيسية لو آيفون.</p>`;
+  else if(pushState==="denied")inner=`<p class="note">الإشعارات محظورة من إعدادات المتصفح — فعّلها من إعدادات الموقع في متصفحك لو حابب توصلك.</p>`;
+  else if(pushState==="subscribed")inner=`<div class="row"><span class="pill" style="background:#ECFDF5;color:#047857">✓ الإشعارات مفعّلة على الجهاز ده</span><button class="btn ghost" onclick="unsubscribePushStatic()">إيقاف الإشعارات</button></div>`;
+  else inner=`<button class="btn" onclick="subscribePushStatic()">🔔 فعّل الإشعارات</button>${VAPID_PUBLIC_KEY?"":`<p class="meta" style="margin-top:6px">هتتفعّل قريب — صاحب الموقع بيظبطها.</p>`}`;
+  return `<section class="card" style="margin-top:16px"><h3 style="margin:0">🔔 إشعارات الموبايل</h3>
+   <p class="meta" style="margin-top:6px;line-height:1.9">فعّل الإشعارات عشان يوصلك تنبيه على موبايلك أول ما تنزل محاضرة جديدة أو إعلان مهم — حتى والموقع مقفل.${pushSubCount?` مشترك دلوقتي ${pushSubCount} جهاز.`:""}</p>
+   <div style="margin-top:8px">${inner}</div>
+   ${pushNote?`<p class="meta" style="margin-top:6px;font-weight:700;color:var(--accent)">${esc(pushNote)}</p>`:""}
+   <p class="meta" style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px">📱 على آيفون: الإشعارات بتشتغل بس لو ضفت الموقع للشاشة الرئيسية الأول (زرار المشاركة ← «إضافة إلى الشاشة الرئيسية») وفتحته من الأيقونة — دي قاعدة أبل (iOS 16.4 أو أحدث).${ios?" وانت فاتح من سفاري دلوقتي، فثبّت الموقع الأول وبعدين فعّل الإشعارات من جوّه التطبيق.":""}</p>
+  </section>`;
+}
+async function pushDetect(){
+  try{
+    if(!("Notification" in window)||!("PushManager" in window)||!("serviceWorker" in navigator)){pushState="unsupported";if(view.name==="home")render();return}
+    if(Notification.permission==="denied"){pushState="denied";if(view.name==="home")render();return}
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.getSubscription();
+    pushState=sub?"subscribed":"ready";
+  }catch(e){pushState="unsupported"}
+  if(view.name==="home")render();
+}
+async function subscribePushStatic(){
+  if(!VAPID_PUBLIC_KEY){pushNote="صاحب الموقع لسه مفعّلش الإشعارات (مفتاح VAPID مش محطوط) — جرّب تاني قريب";render();return}
+  try{
+    const perm=await Notification.requestPermission();
+    if(perm!=="granted"){pushState=perm==="denied"?"denied":"ready";render();return}
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlB64ToUint8Static(VAPID_PUBLIC_KEY)});
+    const j=sub.toJSON();
+    if(LIVE()&&sb&&j.endpoint&&j.keys){
+      const ins=await sb.from("push_subscriptions").insert({endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth});
+      if(ins.error&&!/duplicate|unique/i.test(ins.error.message))pushNote="اتفعّلت على الجهاز بس حفظ الاشتراك فشل: "+ins.error.message+" (جدول الاشتراكات بيتنشأ من قسم 18 في supabase-setup.sql)";
+    }
+    pushState="subscribed"; if(!pushNote)pushNote="تمام! الإشعارات اتفعّلت على الجهاز ده ✓";
+  }catch(e){pushNote="مقدرناش نفعّل الإشعارات — تأكد إنك فاتح الموقع من المتصفح ومثبّته على الشاشة الرئيسية"}
+  render();
+}
+async function unsubscribePushStatic(){
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.getSubscription();
+    if(sub)await sub.unsubscribe();
+  }catch(e){}
+  pushState="ready"; pushNote="اتوقفت الإشعارات على الجهاز ده"; render();
+}
+async function loadPushCount(){
+  const el=document.getElementById("push-count"); if(!el)return;
+  if(!(LIVE()&&sb&&session)){el.textContent="—";return}
+  const {count,error}=await sb.from("push_subscriptions").select("id",{count:"exact",head:true});
+  el.textContent=error?"—":String(count??0);
+}
+async function sendPushStatic(){
+  const err=document.getElementById("push-err");
+  const title=document.getElementById("push-title").value.trim();
+  const body=document.getElementById("push-body").value.trim();
+  if(!title||!body){err.textContent="اكتب عنوان الإشعار ونصه الأول";return}
+  if(!(LIVE()&&sb)){err.textContent="إرسال الإشعارات محتاج Supabase مفعّل في الموقع";return}
+  if(!session){err.textContent=WRITE_SESSION_MSG;return}
+  if(!(await askConfirm("إرسال الإشعار «"+title+"» لكل الطلاب المشتركين؟",{label:"📣 إرسال",danger:false})))return;
+  err.textContent="بيبعت...";
+  try{
+    const {data:sd}=await sb.auth.getSession();
+    const token=sd&&sd.session?sd.session.access_token:"";
+    const res=await fetch(SUPABASE_URL+"/functions/v1/send-push",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token,"apikey":SUPABASE_ANON_KEY},body:JSON.stringify({title,body})});
+    if(!res.ok){
+      const t=await res.text().catch(()=>"");
+      err.textContent="فشل الإرسال ("+res.status+") — غالبًا دالة send-push لسه مش منشورة أو أسرار VAPID ناقصة. خطوات التشغيل في قسم 18 في supabase-setup.sql. "+t.slice(0,160);
+      return;
+    }
+    const j=await res.json();
+    logActivity("push","","",title);
+    adminFlash="اتبعت الإشعار ✓ — وصل لـ "+(j.sent??0)+" من "+(j.total??0)+" جهاز";
+    render();
+  }catch(e){
+    err.textContent="فشل الاتصال بدالة الإرسال — الدالة send-push لسه مش منشورة غالبًا (قسم 18 في supabase-setup.sql)";
+  }
+}
 function questionGroupsHtml(items){
   const groups=new Map();
   for(const i of items){const k=(i.topic||"").trim();if(!groups.has(k))groups.set(k,[]);groups.get(k).push(i)}
@@ -530,8 +713,7 @@ function cardHtml(i,idx){
     ${i.url?`<p class="row"><button class="btn" data-mode="iframe" data-ft="${esc(i.file_type||"")}" data-url="${esc(i.url)}" data-title="${esc(i.title)}" onclick="openViewer(this)">👁 عرض الملخص هنا</button><a class="btn ghost" target="_blank" rel="noopener" href="${esc(i.url)}">فتح / تحميل ↗</a></p>`:""}
     ${doneCheckHtml(i)}</article>`;
   if(i.kind==="video"){const yt=ytId(i.url);const tg=tgPost(i.url);return `<article class="card">
-    ${tg?`<div style="display:flex;justify-content:center"><script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-post="${tg}" data-width="100%"></scr`+`ipt></div>`
-    :yt?`<div><button class="btn" style="width:100%;justify-content:center;min-height:120px;font-size:18px" onclick="playVideo(this.parentElement,'${yt}')">▶ تشغيل الفيديو</button></div>`:""}
+    ${i.url?`<div><button class="btn" style="width:100%;justify-content:center;min-height:120px;font-size:18px" data-yt="${yt||""}" data-tg="${tg||""}" data-url="${esc(i.url)}" data-title="${esc(i.title)}" onclick="openVideoViewer(this)">▶ تشغيل الفيديو في نافذة</button></div>`:""}
     <h3 style="margin-top:10px">${esc(i.title)}</h3>
     ${i.description?`<div class="meta">${esc(i.description)}</div>`:""}
     ${i.url?`<p><a class="btn" target="_blank" rel="noopener" href="${esc(i.url)}">فتح الرابط ↗</a></p>`:""}
@@ -550,6 +732,20 @@ function cardHtml(i,idx){
 /* ---------------- الأدمن ---------------- */
 function renderAdmin(){
   const items=LIVE()?published:localItems();
+  const flash=adminFlash; adminFlash="";
+  /* قائمة المحتوى الحي مرتّبة بنفس تجميع العرض للطلاب (مادة ثم نوع ثم
+     محاضرة/سكشن ثم ترتيب العرض) + موضع كل عنصر جوه مجموعته لأزرار ↑ ↓ */
+  const KIND_RANK={video:0,recording:1,file:2,summary:3,question:4};
+  const subjRank=slug=>{const ix=allSubjects().findIndex(s=>s.slug===slug);return ix<0?99:ix};
+  const adminOrdered=[...items].sort((a,b)=>subjRank(a.subject_slug)-subjRank(b.subject_slug)
+    ||(KIND_RANK[a.kind]??9)-(KIND_RANK[b.kind]??9)
+    ||String(a.file_category||"lecture").localeCompare(String(b.file_category||"lecture"))
+    ||byDisplayOrder(a,b));
+  const groupPosOf={};
+  for(const i of adminOrdered){
+    const g=adminOrdered.filter(x=>x.subject_slug===i.subject_slug&&x.kind===i.kind&&(x.file_category||"lecture")===(i.file_category||"lecture"));
+    groupPosOf[i.kind+":"+i.id]={idx:g.findIndex(x=>x.kind===i.kind&&x.id===i.id),size:g.length};
+  }
   const locked=!adminUnlocked;
   if(adminUnlocked&&!adminName()){
     $app.innerHTML=`
@@ -565,6 +761,7 @@ function renderAdmin(){
   $app.innerHTML=`
    <button class="btn ghost" onclick="go('home')">→ الرئيسية</button>
    <h2>🛠️ صفحة الأدمن — سهّلي فيزيو</h2>
+   ${flash?`<div class="note ok">✅ ${esc(flash)}</div>`:""}
    ${LIVE()
      ? `<div class="note ok">✅ <b>Supabase Realtime مفعّل:</b> القراءة عامة للطلبة، والكتابة للأدمن المسجّل فقط. أي إضافة/تعديل/حذف بيظهر لكل المستخدمين في ثوانٍ عبر Realtime — من غير إعادة رفع أو نشر.</div>`
      : `<div class="note">⚠️ Supabase غير مفعّل بعد: املأ SUPABASE_URL و SUPABASE_ANON_KEY في أول الملف ونفّذ supabase-setup.sql. مؤقتًا الإضافات محلية على جهازك مع تصدير content.json.</div>`}
@@ -617,10 +814,11 @@ function renderAdmin(){
      <label class="btn ghost" style="display:inline-flex;align-items:center">⬆️ استيراد content.json<input type="file" accept=".json,application/json" style="display:none" onchange="importJson(this)"></label></div>
    </section>`}
    <section><h3>${LIVE()?"المحتوى الحي في Supabase":"إضافاتك المحلية"} (${items.length})</h3>
-   ${items.length===0?`<div class="empty">مفيش محتوى لسه.</div>`:items.map(i=>`<div class="card"><div class="row" style="justify-content:space-between">
+   <p class="meta">«تعديل» بيفتح العنصر في نموذج الإضافة فوق عشان تغيّر أي حاجة فيه (العنوان أو الرابط أو الشرح أو المادة...) وبعدين تضغط «حفظ التعديل». وأزرار ↑ ↓ بترتّب عرض العناصر — الترتيب اللي هنا هو نفس ترتيب ظهور المحتوى للطلاب في صفحة المادة وبيتحفظ في قاعدة البيانات. التعديل والحذف وتغيير الترتيب بيتسجلوا باسمك.</p>
+   ${items.length===0?`<div class="empty">مفيش محتوى لسه.</div>`:adminOrdered.map(i=>{const gp=groupPosOf[i.kind+":"+i.id]||{idx:0,size:1};return `<div class="card"><div class="row" style="justify-content:space-between">
      <div><strong>${KIND_ICONS[i.kind]||"📄"} ${esc(i.kind==="question"?(i.question_text||""):i.title)}</strong>
      <div class="meta">${esc(subj(i.subject_slug).ar)} · ${i.kind}</div></div>
-     <div class="row"><button class="btn ghost" style="color:#DC2626" onclick="deleteItem('${i.kind}',${i.id})">حذف</button></div></div></div>`).join("")}
+     <div class="row"><button class="btn ghost" ${gp.idx<=0?"disabled":""} onclick="moveItem('${i.kind}',${i.id},'up')" aria-label="نقل لأعلى">↑</button><button class="btn ghost" ${gp.idx>=gp.size-1?"disabled":""} onclick="moveItem('${i.kind}',${i.id},'down')" aria-label="نقل لأسفل">↓</button><button class="btn ghost" onclick="editItem('${i.kind}',${i.id})">✏️ تعديل</button><button class="btn ghost" style="color:#DC2626" onclick="deleteItem('${i.kind}',${i.id})">🗑 حذف</button></div></div></div>`}).join("")}
    </section>
    <section class="card"><h3>💡 اقتراحات من الزوار</h3>
     <p class="meta">مصادر بيقترحها الطلاب من زرار «شارك وساعد» في صفحات المواد. القبول بيضيف المصدر للمادة تلقائيًا، والرفض بيشيله من الانتظار — والاتنين بيتسجلوا باسمك.</p>
@@ -660,10 +858,19 @@ function renderAdmin(){
     :`<button class="btn" onclick="askAnnouncement()">📢 إعلام</button>`}
     ${announcementText?(annClearPending?`<div class="note">إلغاء الإعلام خالص؟ الشريط هيختفي من الموقع العام فورًا.<div class="row" style="margin-top:8px"><button class="btn" style="background:#DC2626" onclick="clearAnnouncement()">أيوه، ألغي الإعلام</button><button class="btn ghost" onclick="cancelClearAnnouncement()">لأ</button></div></div>`
     :`<p style="margin-top:8px"><button class="btn ghost" style="color:#DC2626" onclick="askClearAnnouncement()">🗑 إلغاء الإعلام خالص</button></p>`):""}
+   </section>
+   <section class="card"><h3>📣 إشعارات الموبايل (Push)</h3>
+    <p class="meta">ابعت إشعارًا بعنوان ونص (زي الإعلام) فيوصل لموبايلات الطلاب المشتركين حتى والموقع مقفل. المشتركين دلوقتي: <strong id="push-count">…</strong> جهاز. الطالب بيشترك من كارت «إشعارات الموبايل» في الرئيسية — وعلى آيفون لازم يثبّت الموقع على الشاشة الرئيسية الأول (قاعدة أبل).</p>
+    ${VAPID_PUBLIC_KEY?"":`<div class="note">⚠️ الإشعارات لسه مش مفعّلة بالكامل: مفتاح VAPID العام مش محطوط في الموقع ودالة send-push لازم تتنشر — خطوات التشغيل خطوة بخطوة في قسم 18 في ملف supabase-setup.sql.</div>`}
+    <label for="push-title">عنوان الإشعار</label><input id="push-title" maxlength="120" placeholder="مثال: محاضرة جديدة نزلت 📚">
+    <label for="push-body">نص الإشعار</label><textarea id="push-body" rows="3" maxlength="500" placeholder="مثال: نزلت محاضرة التشريح العصبي — ادخل شوفها دلوقتي"></textarea>
+    <p id="push-err" style="color:#DC2626;font-weight:700"></p>
+    <button class="btn" onclick="sendPushStatic()">📣 إرسال الإشعار لكل المشتركين</button>
    </section>`}`;
   if(adminUnlocked&&adminName())fillSubjects();
   if(adminUnlocked&&adminName())loadSuggestionsStatic();
   if(adminUnlocked&&adminName())loadAnonAdmin();
+  if(adminUnlocked&&adminName())loadPushCount();
 }
 function fillSubjects(){
   const semSel=document.getElementById("a-semester"),subSel=document.getElementById("a-subject");
@@ -862,10 +1069,13 @@ function rowForDb(d){
      «null value in column "description" violates not-null constraint». */
   const txt=v=>(v===null||v===undefined)?"":v;
   const sid=subjectIdBySlug[d.subject_slug]||null;
-  if(d.kind==="video"){const tg=tgPost(d.url);return {subject_id:sid,title:d.title,url:tg?("https://t.me/"+tg):d.url,description:txt(d.description)}}
-  if(d.kind==="recording")return {subject_id:sid,title:d.title,url:d.url,file_category:d.file_category||"lecture",description:txt(d.description)};
-  if(d.kind==="file"||d.kind==="summary")return {subject_id:sid,title:d.title,url:d.url,file_type:txt(d.file_type),file_category:d.file_category||"lecture",description:txt(d.description)};
-  return {subject_id:sid,question:d.question_text,answer:txt(d.answer_text),topic:txt(d.topic),image_url:txt(d.image_url),description:txt(d.description)};
+  /* ترتيب العرض (قسم 17): بيتحط في الصف بس لو محسوب — عشان الإضافة
+     ما تقعش لو القسم لسه ما اتنفذش في المشروع الحي */
+  const so=(typeof d.sort_order==="number")?{sort_order:d.sort_order}:{};
+  if(d.kind==="video"){const tg=tgPost(d.url);return {subject_id:sid,title:d.title,url:tg?("https://t.me/"+tg):d.url,description:txt(d.description),...so}}
+  if(d.kind==="recording")return {subject_id:sid,title:d.title,url:d.url,file_category:d.file_category||"lecture",description:txt(d.description),...so};
+  if(d.kind==="file"||d.kind==="summary")return {subject_id:sid,title:d.title,url:d.url,file_type:txt(d.file_type),file_category:d.file_category||"lecture",description:txt(d.description),...so};
+  return {subject_id:sid,question:d.question_text,answer:txt(d.answer_text),topic:txt(d.topic),image_url:txt(d.image_url),description:txt(d.description),...so};
 }
 async function saveItem(){
   const d=collect(),err=document.getElementById("a-err");
@@ -875,13 +1085,26 @@ async function saveItem(){
   if(d.kind==="file"&&!d.title){err.textContent="اكتب عنوان الملف";return}
   if(d.kind==="summary"&&!d.title){err.textContent="اكتب عنوان الملخص";return}
   if(d.kind==="question"&&(!d.question_text||!d.answer_text)){err.textContent="اكتب السؤال والإجابة";return}
+  /* العنصر الجديد بياخد أول ترتيب العرض في مجموعته (مادة + نوع + محاضرة/سكشن) */
+  if(!editing){
+    const src=LIVE()?published:localItems();
+    const cat=d.file_category||"lecture";
+    const mins=src.filter(x=>x.subject_slug===d.subject_slug&&x.kind===d.kind&&(x.file_category||"lecture")===cat).map(ordOf);
+    d.sort_order=(mins.length?Math.min(...mins):0)-1;
+  }
   if(LIVE()){
     if(!session){err.textContent=WRITE_SESSION_MSG;return}
     err.textContent="بيحفظ في Supabase...";
     const table=TABLE_FOR_KIND[editing?editing.kind:d.kind];
-    const res=editing
+    let res=editing
       ? await sb.from(table).update(rowForDb(d)).eq("id",editing.id)
       : await sb.from(TABLE_FOR_KIND[d.kind]).insert(rowForDb(d));
+    /* لو قسم 17 (عمود sort_order) لسه ما اتنفذش في المشروع الحي، إعادة
+       المحاولة من غير العمود عشان الإضافة نفسها ما تقعش */
+    if(res.error&&!editing&&/sort_order/.test(res.error.message||"")){
+      const row=rowForDb(d); delete row.sort_order;
+      res=await sb.from(TABLE_FOR_KIND[d.kind]).insert(row);
+    }
     if(res.error){err.textContent="فشل الحفظ: "+res.error.message;return}
     logActivity(editing?"update":"add",d.kind,d.subject_slug,d.kind==="question"?d.question_text:d.title);
     editing=null; await fetchAllLive(); render(); return;
@@ -911,17 +1134,50 @@ function editItem(kind,id){
 }
 function cancelEdit(){editing=null;render()}
 async function deleteItem(kind,id){
-  if(!confirm("حذف العنصر ده نهائيًا؟"))return;
+  /* التأكيد بنافذة داخلية (askConfirm) — الحذف ما بيتنفذش غير لو
+     الأدمن ضغط «حذف» جوّه النافذة، وبعدها بتظهر رسالة نجاح خضراء
+     أعلى صفحة الأدمن (أو رسالة خطأ واضحة لو الحذف فشل) */
   const it=(LIVE()?published:localItems()).find(x=>x.kind===kind&&x.id===id);
+  if(!(await askConfirm("حذف «"+(it?(kind==="question"?it.question_text:it.title):"العنصر")+"» نهائيًا؟")))return;
   if(LIVE()){
     if(!session){alert(WRITE_SESSION_MSG);return}
     const {error}=await sb.from(TABLE_FOR_KIND[kind]).delete().eq("id",id);
     if(error){alert("فشل الحذف: "+error.message);return}
     if(it)logActivity("delete",kind,it.subject_slug,it.kind==="question"?it.question_text:it.title);
+    adminFlash="تم حذف العنصر ✓ واتشال من المادة";
     await fetchAllLive();render();return;
   }
   if(it)logActivity("delete",kind,it.subject_slug,it.kind==="question"?it.question_text:it.title);
+  adminFlash="تم حذف العنصر ✓ واتشال من المادة";
   saveLocal(localItems().filter(i=>!(i.kind===kind&&i.id===id)));render();
+}
+/* ترتيب العرض: نقل عنصر خطوة لأعلى/لأسفل جوه مجموعته (مادة + نوع +
+   محاضرة/سكشن) — المجموعة بتتعدّ ترقيمها (١٠، ٢٠، ٣٠...) وتتحفظ،
+   فالترتيب الجديد هو اللي بيظهر للطلاب في صفحة المادة */
+async function moveItem(kind,id,dir){
+  const src=LIVE()?published:localItems();
+  const it=src.find(x=>x.kind===kind&&x.id===id); if(!it)return;
+  const cat=it.file_category||"lecture";
+  const group=src.filter(x=>x.subject_slug===it.subject_slug&&x.kind===kind&&(x.file_category||"lecture")===cat).sort(byDisplayOrder);
+  const idx=group.findIndex(x=>x.kind===kind&&x.id===id);
+  const swap=dir==="up"?idx-1:idx+1;
+  if(idx<0||swap<0||swap>=group.length)return;
+  const reordered=[...group]; const mv=reordered.splice(idx,1)[0]; reordered.splice(swap,0,mv);
+  reordered.forEach((x,pos)=>{x.sort_order=(pos+1)*10});
+  if(LIVE()){
+    if(!session){alert(WRITE_SESSION_MSG);return}
+    const table=TABLE_FOR_KIND[kind];
+    for(const x of reordered){
+      const {error}=await sb.from(table).update({sort_order:x.sort_order}).eq("id",x.id);
+      if(error){alert("فشل حفظ الترتيب: "+error.message+" — لو دي أول مرة تستخدم الترتيب، نفّذ قسم 17 من ملف supabase-setup.sql في SQL Editor مرة واحدة وبعدين جرّب تاني.");return}
+    }
+    logActivity("move",kind,it.subject_slug,kind==="question"?it.question_text:it.title);
+    await fetchAllLive(); render(); return;
+  }
+  const all=localItems().map(x=>{const g=reordered.find(r=>r.kind===x.kind&&r.id===x.id);return g?{...x,sort_order:g.sort_order}:x});
+  saveLocal(all);
+  logActivity("move",kind,it.subject_slug,kind==="question"?it.question_text:it.title);
+  render();
 }
 function exportJson(){
   const data={platform:"سهّلي فيزيو — Sahli Physio",version:2,items:allItems()};
@@ -1042,6 +1298,7 @@ async function loadSuggestionsStatic(){
     <div class="row" style="margin-top:6px"><button class="btn" onclick="reviewSuggestion(${r.id},true,${r.live?1:0})">✓ قبول وإضافة</button><button class="btn ghost" style="color:#DC2626" onclick="reviewSuggestion(${r.id},false,${r.live?1:0})">✗ رفض</button></div></div>`).join("");
 }
 async function reviewSuggestion(id,accept,live){
+  if(!accept&&!(await askConfirm("رفض الاقتراح ده وحذفه من قائمة الانتظار؟")))return;
   if(live){
     if(!session){alert(WRITE_SESSION_MSG);return}
     const {data,error}=await sb.from("suggestions").select("*").eq("id",id).single();
@@ -1055,6 +1312,7 @@ async function reviewSuggestion(id,accept,live){
     logActivity(accept?"accept_suggestion":"reject_suggestion",data.kind,slug,data.kind==="question"?data.question:data.title);
     const up=await sb.from("suggestions").update({status:accept?"accepted":"rejected"}).eq("id",id);
     if(up.error){alert("فشل تحديث الحالة: "+up.error.message);return}
+    if(!accept)adminFlash="تم رفض الاقتراح وحذفه من قائمة الانتظار ✓";
     await fetchAllLive(); render(); return;
   }
   let arr=lsGet("sahli-suggestions",[]); const sg=arr.find(x=>x.id===id); if(!sg)return;
@@ -1062,7 +1320,7 @@ async function reviewSuggestion(id,accept,live){
     const items=localItems(); items.unshift({id:Date.now(),created_at:new Date().toISOString(),subject_slug:sg.subject_slug,kind:sg.kind,title:sg.title,url:sg.url,file_type:null,file_category:sg.file_category||"lecture",description:null,question_text:sg.question_text,answer_text:sg.answer_text,topic:sg.topic||null,image_url:sg.image_url||null}); saveLocal(items);
   }
   logActivity(accept?"accept_suggestion":"reject_suggestion",sg.kind,sg.subject_slug,sg.kind==="question"?sg.question_text:sg.title);
-  arr=arr.map(x=>x.id===id?{...x,status:accept?"accepted":"rejected"}:x); lsSet("sahli-suggestions",arr); render();
+  arr=arr.map(x=>x.id===id?{...x,status:accept?"accepted":"rejected"}:x); lsSet("sahli-suggestions",arr); if(!accept)adminFlash="تم رفض الاقتراح وحذفه من قائمة الانتظار ✓"; render();
 }
 /* ---------------- إدارة الامتحانات والأسئلة المجهولة (أدمن النسخة الستاتيك) ---------------- */
 function examsAdminListHtml(){
@@ -1090,7 +1348,7 @@ async function addExamStatic(){
   alert("تمت إضافة الامتحان ✓ وظهر في جدول الامتحانات والعدّاد التنازلي"); render();
 }
 async function deleteExamStatic(id){
-  if(!confirm("حذف الامتحان ده؟"))return;
+  if(!(await askConfirm("حذف الامتحان ده نهائيًا؟")))return;
   const ex=examsList.find(e=>String(e.id)===String(id));
   if(LIVE()&&sb){
     if(!session){alert(WRITE_SESSION_MSG);return}
@@ -1099,6 +1357,7 @@ async function deleteExamStatic(id){
     await fetchAllLive();
   } else { examsList=examsList.filter(e=>String(e.id)!==String(id)); lsSet("sahli-exams",examsList); }
   logActivity("delete_exam","",ex?ex.subject_slug||"":"",ex?ex.title:"");
+  adminFlash="تم حذف الامتحان ✓";
   render();
 }
 async function loadAnonAdmin(){
@@ -1136,7 +1395,7 @@ async function answerAnonStatic(id){
   alert("تم نشر السؤال وإجابته في الأسئلة المتكررة ✓"); render();
 }
 async function deleteAnonStatic(id){
-  if(!confirm("حذف السؤال ده وكل ردوده نهائيًا؟"))return;
+  if(!(await askConfirm("حذف السؤال ده وكل ردوده نهائيًا؟")))return;
   const q0=anonAll.find(x=>String(x.id)===String(id));
   if(LIVE()&&sb){
     if(!session){alert(WRITE_SESSION_MSG);return}
@@ -1146,10 +1405,11 @@ async function deleteAnonStatic(id){
     await fetchAllLive();
   } else { anonAll=anonAll.filter(x=>String(x.id)!==String(id)); lsSet("sahli-anon-questions",anonAll); }
   logActivity("delete_anon","","",q0?q0.question_text:"");
+  adminFlash="تم حذف السؤال وكل ردوده ✓";
   render();
 }
 async function deleteAnonReplyStatic(id){
-  if(!confirm("حذف الرد ده؟"))return;
+  if(!(await askConfirm("حذف الرد ده نهائيًا؟")))return;
   if(LIVE()&&sb){
     if(!session){alert(WRITE_SESSION_MSG);return}
     const {error}=await sb.from("anon_replies").delete().eq("id",id);
@@ -1157,6 +1417,7 @@ async function deleteAnonReplyStatic(id){
     await fetchAllLive();
   } else { for(const q of anonAll)q.replies=(q.replies||[]).filter(r=>String(r.id)!==String(id)); lsSet("sahli-anon-questions",anonAll); }
   logActivity("delete_anon_reply","","","");
+  adminFlash="تم حذف الرد ✓";
   render();
 }
 /* ---------------- تذكيرات المذاكرة (محلية على جهاز الطالب) ---------------- */
@@ -1334,6 +1595,7 @@ if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
 }
 studyChipRender();
 load();
+pushDetect();
 </script>
 </body>
 </html>

@@ -2,8 +2,10 @@
    بيسمح بتثبيت الموقع كتطبيق على الشاشة الرئيسية، وبيخزّن هيكل
    الموقع (الصفحة + الأيقونات + الصور) عشان يفتح بسرعة. بيانات
    Supabase (المحتوى الحي) دايمًا من الشبكة ومش بتتخزن هنا،
-   فالمحتوى يفضل محدّث لحظيًا. */
-const CACHE = "sahli-physio-v1";
+   فالمحتوى يفضل محدّث لحظيًا. وكمان بيستقبل إشعارات الدفع
+   (Web Push) اللي الأدمن بيبعتها من صفحة الأدمن وبيعرضها على
+   الموبايل حتى والموقع مقفل تمامًا. */
+const CACHE = "sahli-physio-v2";
 const CORE = [
   "./",
   "./index.html",
@@ -64,5 +66,42 @@ self.addEventListener("fetch", (event) => {
           return res;
         })
     )
+  );
+});
+
+/* ---------- إشعارات الدفع (Web Push) ----------
+   الإشعار بيتبعت من دالة Supabase ‏(send-push) بمفاتيح VAPID،
+   وبيوصل هنا حتى لو الموقع مقفل — العنوان والنص من الأدمن */
+self.addEventListener("push", (event) => {
+  let data = { title: "سهّلي فيزيو", body: "", url: "./" };
+  try {
+    if (event.data) data = { ...data, ...event.data.json() };
+  } catch (e) {
+    if (event.data) data.body = event.data.text();
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || "سهّلي فيزيو", {
+      body: data.body || "",
+      icon: "./icons/icon-192.png",
+      badge: "./icons/icon-192.png",
+      dir: "rtl",
+      lang: "ar",
+      data: { url: data.url || "./" },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "./";
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((list) => {
+        for (const client of list) {
+          if ("focus" in client) return client.focus();
+        }
+        if (self.clients.openWindow) return self.clients.openWindow(target);
+      })
   );
 });

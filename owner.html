@@ -39,7 +39,7 @@ const SUPABASE_ANON_KEY="sb_publishable_OCCYtuz890QNDy9GpkBarg_CqjhCbt5";
 const $app=document.getElementById("app");
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const lsGet=(k,d)=>{try{return JSON.parse(localStorage.getItem(k)||"null")??d}catch{return d}};
-const LABELS={add:"إضافة محتوى",update:"تعديل محتوى",delete:"حذف محتوى",add_semester:"إضافة سيمستر",add_subject:"إضافة مادة",update_cohort:"تغيير سنة الدفعة"};
+const LABELS={add:"إضافة محتوى",update:"تعديل محتوى",move:"تغيير ترتيب محتوى",delete:"حذف محتوى",add_semester:"إضافة سيمستر",add_subject:"إضافة مادة",update_cohort:"تغيير سنة الدفعة",push:"📣 إرسال إشعار موبايل",push_setup:"🔑 حفظ مفاتيح إشعارات الموبايل"};
 const fmt=iso=>new Date(iso).toLocaleString("ar-EG",{dateStyle:"medium",timeStyle:"short"});
 
 function gate(err){
