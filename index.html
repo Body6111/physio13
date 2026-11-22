@@ -586,6 +586,9 @@ function answerConfirm(v){
 }
 /* رسالة نجاح بتظهر مرة واحدة أعلى صفحة الأدمن بعد أي عملية حذف */
 let adminFlash="";
+/* المادة المختارة في صندوق «المحتوى الحي مرتّب بالمادة» — اختيار
+   مستقل عن مادة نموذج الإضافة، وبيفضل ثابت وانت شغال في الصفحة */
+let liveSubjectSlug=null;
 /* ---------------- إشعارات الدفع (Web Push) ----------------
    الطالب يفعّل الإشعارات من كارت في الرئيسية: إذن المتصفح + اشتراك
    عند خدمة الدفع بمفتاح VAPID العام + حفظ الاشتراك في جدول
@@ -761,19 +764,21 @@ function cardHtml(i,idx){
 function renderAdmin(){
   const items=LIVE()?published:localItems();
   const flash=adminFlash; adminFlash="";
-  /* قائمة المحتوى الحي مرتّبة بنفس تجميع العرض للطلاب (مادة ثم نوع ثم
-     محاضرة/سكشن ثم ترتيب العرض) + موضع كل عنصر جوه مجموعته لأزرار ↑ ↓ */
-  const KIND_RANK={video:0,recording:1,file:2,summary:3,question:4};
-  const subjRank=slug=>{const ix=allSubjects().findIndex(s=>s.slug===slug);return ix<0?99:ix};
-  const adminOrdered=[...items].sort((a,b)=>subjRank(a.subject_slug)-subjRank(b.subject_slug)
-    ||(KIND_RANK[a.kind]??9)-(KIND_RANK[b.kind]??9)
-    ||String(a.file_category||"lecture").localeCompare(String(b.file_category||"lecture"))
-    ||byDisplayOrder(a,b));
-  const groupPosOf={};
-  for(const i of adminOrdered){
-    const g=adminOrdered.filter(x=>x.subject_slug===i.subject_slug&&x.kind===i.kind&&(x.file_category||"lecture")===(i.file_category||"lecture"));
-    groupPosOf[i.kind+":"+i.id]={idx:g.findIndex(x=>x.kind===i.kind&&x.id===i.id),size:g.length};
-  }
+  /* صندوق المحتوى الحي المنظّم بالمادة: عدد عناصر كل مادة، والمادة
+     المختارة في الصندوق (أو مادة نموذج الإضافة الحالية، أو أول مادة
+     فيها محتوى)، ومحتواها متجمع (نوع ← محاضرة/سكشن) بنفس ترتيب
+     العرض للطلاب — وموضع كل عنصر هو ترتيبه جوّه مجموعته في المصفوفة */
+  const countBySlug={}; for(const i of items)countBySlug[i.subject_slug]=(countBySlug[i.subject_slug]||0)+1;
+  const formSubjectEl=document.getElementById("a-subject");
+  const liveSubj=allSubjects().find(s=>s.slug===liveSubjectSlug)
+    ||allSubjects().find(s=>formSubjectEl&&s.slug===formSubjectEl.value)
+    ||allSubjects().find(s=>(countBySlug[s.slug]||0)>0)
+    ||allSubjects()[0];
+  const LIVE_GROUPS=[["video",null,"🎬 فيديوهات"],["recording","lecture","🎙️ ريكوردات المحاضرات"],["recording","section","🎙️ ريكوردات السكاشن"],["file","lecture","📁 ملفات المحاضرات"],["file","section","📁 ملفات السكاشن"],["summary","lecture","📝 ملخصات المحاضرات"],["summary","section","📝 ملخصات السكاشن"],["question",null,"❓ أسئلة"]];
+  const liveGroups=liveSubj?LIVE_GROUPS.map(([k,cat,label])=>({kind:k,cat,label,rows:items.filter(i=>i.subject_slug===liveSubj.slug&&i.kind===k&&(cat===null||(i.file_category||"lecture")===cat)).sort(byDisplayOrder)})).filter(g=>g.rows.length>0):[];
+  const liveTotal=liveSubj?(countBySlug[liveSubj.slug]||0):0;
+  const liveKindCounts=liveSubj?{video:0,recording:0,file:0,summary:0,question:0}:null;
+  if(liveSubj)for(const i of items)if(i.subject_slug===liveSubj.slug&&liveKindCounts&&i.kind in liveKindCounts)liveKindCounts[i.kind]++;
   const locked=!adminUnlocked;
   if(adminUnlocked&&!adminName()){
     $app.innerHTML=`
@@ -843,12 +848,16 @@ function renderAdmin(){
      <div class="row"><button class="btn" onclick="exportJson()">⬇️ تصدير content.json</button>
      <label class="btn ghost" style="display:inline-flex;align-items:center">⬆️ استيراد content.json<input type="file" accept=".json,application/json" style="display:none" onchange="importJson(this)"></label></div>
    </section>`}
-   <section><h3>${LIVE()?"المحتوى الحي في Supabase":"إضافاتك المحلية"} (${items.length})</h3>
-   <p class="meta">«تعديل» بيفتح العنصر في نموذج الإضافة فوق عشان تغيّر أي حاجة فيه (العنوان أو الرابط أو الشرح أو المادة...) وبعدين تضغط «حفظ التعديل». وأزرار ↑ ↓ بترتّب عرض العناصر — الترتيب اللي هنا هو نفس ترتيب ظهور المحتوى للطلاب في صفحة المادة وبيتحفظ في قاعدة البيانات. التعديل والحذف وتغيير الترتيب بيتسجلوا باسمك.</p>
-   ${items.length===0?`<div class="empty">مفيش محتوى لسه.</div>`:adminOrdered.map(i=>{const gp=groupPosOf[i.kind+":"+i.id]||{idx:0,size:1};return `<div class="card"><div class="row" style="justify-content:space-between">
-     <div><strong>${KIND_ICONS[i.kind]||"📄"} ${esc(i.kind==="question"?(i.question_text||""):i.title)}</strong>
-     <div class="meta">${esc(subj(i.subject_slug).ar)} · ${i.kind}</div></div>
-     <div class="row"><button class="btn ghost" ${gp.idx<=0?"disabled":""} onclick="moveItem('${i.kind}','${i.id}','up')" aria-label="نقل لأعلى">↑</button><button class="btn ghost" ${gp.idx>=gp.size-1?"disabled":""} onclick="moveItem('${i.kind}','${i.id}','down')" aria-label="نقل لأسفل">↓</button><button class="btn ghost" onclick="editItem('${i.kind}','${i.id}')">✏️ تعديل</button><button class="btn ghost" style="color:#DC2626" onclick="deleteItem('${i.kind}','${i.id}')">🗑 حذف</button></div></div></div>`}).join("")}
+   <section class="card"><h3>📦 ${LIVE()?"المحتوى الحي — مرتّب بالمادة":"إضافاتك المحلية — مرتّبة بالمادة"}</h3>
+   <p class="meta">اختر المادة من الصندوق، وهتلاقي كل محتواها متجمع تحت بعضه زي ما بيظهر للطلاب بالظبط (فيديوهات، ريكوردات، ملفات محاضرات وسكاشن، ملخصات، أسئلة). «تعديل» بيفتح العنصر في نموذج الإضافة فوق عشان تغيّر أي حاجة فيه (العنوان أو الرابط أو الشرح أو المادة...) وبعدين تضغط «حفظ التعديل». وأزرار ↑ ↓ بترتّب العناصر جوّه قسمها — الترتيب اللي هنا هو نفس ترتيب ظهور المحتوى للطلاب في صفحة المادة وبيتحفظ في قاعدة البيانات. التعديل والحذف وتغيير الترتيب بيتسجلوا باسمك.</p>
+   ${allSemesters().map(sem=>{const ss=allSubjects().filter(s=>(s.semester||"semester-1")===sem.slug);if(!ss.length)return "";return `<p class="meta" style="margin:12px 0 4px"><b>${esc(sem.ar)}${sem.term?" — "+esc(sem.term):""}</b></p><p class="row" style="margin:0">${ss.map(s=>`<button class="btn ${liveSubj&&s.slug===liveSubj.slug?"":"ghost"}" onclick="pickLiveSubject('${s.slug}')" aria-label="عرض محتوى مادة ${esc(s.ar)} — ${countBySlug[s.slug]||0} عنصر">${s.icon} ${esc(s.ar)} (${countBySlug[s.slug]||0})</button>`).join("")}</p>`}).join("")}
+   ${!liveSubj?`<div class="empty">لسه مفيش مواد — أضف مادة الأول من قسم «إضافة مادة» فوق.</div>`:`
+   <h4 style="margin:16px 0 2px">${liveSubj.icon} ${esc(liveSubj.ar)} — ${esc(liveSubj.en)} (${liveTotal} عنصر)</h4>
+   ${liveKindCounts?`<p class="meta" style="margin:0">🎬 ${liveKindCounts.video} فيديو · 🎙️ ${liveKindCounts.recording} ريكورد · 📁 ${liveKindCounts.file} ملف · 📝 ${liveKindCounts.summary} ملخص · ❓ ${liveKindCounts.question} سؤال</p>`:""}
+   ${liveTotal===0?`<div class="empty">المادة دي لسه فاضية — أضف محتواها من نموذج الإضافة فوق وهيظهر هنا على طول عشان ترتّبه.</div>`:liveGroups.map(g=>`<h4 style="margin:16px 0 6px">${g.label} <span class="pill">${g.rows.length}</span></h4>`+g.rows.map((i,idx)=>`<div class="card"><div class="row" style="justify-content:space-between">
+     <div><strong>${idx+1}. ${KIND_ICONS[i.kind]||"📄"} ${esc(i.kind==="question"?(i.question_text||""):i.title)}</strong>
+     <div class="meta">${(i.kind==="file"||i.kind==="summary")&&i.file_type?esc(i.file_type)+" · ":""}${i.kind==="question"&&i.topic?"🏷 "+esc(i.topic)+" · ":""}${new Date(i.created_at).toLocaleDateString("ar-EG")}</div></div>
+     <div class="row"><button class="btn ghost" ${idx<=0?"disabled":""} onclick="moveItem('${i.kind}','${i.id}','up')" aria-label="نقل لأعلى">↑</button><button class="btn ghost" ${idx>=g.rows.length-1?"disabled":""} onclick="moveItem('${i.kind}','${i.id}','down')" aria-label="نقل لأسفل">↓</button><button class="btn ghost" onclick="editItem('${i.kind}','${i.id}')">✏️ تعديل</button><button class="btn ghost" style="color:#DC2626" onclick="deleteItem('${i.kind}','${i.id}')">🗑 حذف</button></div></div></div>`).join("")).join("")}`}
    </section>
    <section class="card"><h3>💡 اقتراحات من الزوار</h3>
     <p class="meta">مصادر بيقترحها الطلاب من زرار «شارك وساعد» في صفحات المواد. القبول بيضيف المصدر للمادة تلقائيًا، والرفض بيشيله من الانتظار — والاتنين بيتسجلوا باسمك.</p>
@@ -1283,6 +1292,9 @@ async function deleteItem(kind,id){
 /* ترتيب العرض: نقل عنصر خطوة لأعلى/لأسفل جوه مجموعته (مادة + نوع +
    محاضرة/سكشن) — المجموعة بتتعدّ ترقيمها (١٠، ٢٠، ٣٠...) وتتحفظ،
    فالترتيب الجديد هو اللي بيظهر للطلاب في صفحة المادة */
+/* اختيار مادة صندوق المحتوى الحي المنظّم — بيعيد رسم صفحة الأدمن
+   والصندوق واقف على المادة المختارة ومحتواها */
+function pickLiveSubject(slug){liveSubjectSlug=slug;render()}
 async function moveItem(kind,id,dir){
   const src=LIVE()?published:localItems();
   const it=src.find(x=>x.kind===kind&&String(x.id)===String(id)); if(!it)return;
