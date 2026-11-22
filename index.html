@@ -646,13 +646,21 @@ async function sendPushStatic(){
   if(!session){err.textContent=WRITE_SESSION_MSG;return}
   if(!(await askConfirm("إرسال الإشعار «"+title+"» لكل الطلاب المشتركين؟",{label:"📣 إرسال",danger:false})))return;
   err.textContent="بيبعت...";
+  const postPush=async(token)=>await fetch(SUPABASE_URL+"/functions/v1/send-push",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token,"apikey":SUPABASE_ANON_KEY},body:JSON.stringify({title,body})});
   try{
-    const {data:sd}=await sb.auth.getSession();
-    const token=sd&&sd.session?sd.session.access_token:"";
-    const res=await fetch(SUPABASE_URL+"/functions/v1/send-push",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token,"apikey":SUPABASE_ANON_KEY},body:JSON.stringify({title,body})});
+    // التوكن بييجي من الـ session اللي في الذاكرة أصلًا (اتجابت عند التحميل
+    // وبتتحدّث بـ onAuthStateChange) — من غير استدعاء getSession() تاني،
+    // لأنه كان ممكن يرمي استثناء على سفاري الآيفون رغم إن الجلسة موجودة.
+    let res=await postPush(session.access_token);
+    if(res.status===401){
+      // التوكن منتهي غالبًا: جدّد الجلسة مرة واحدة وحدّثها في الذاكرة،
+      // وبعدين أعد محاولة الإرسال مرة واحدة بالتوكن الجديد.
+      const {data:rd,error:rerr}=await sb.auth.refreshSession();
+      if(!rerr&&rd&&rd.session){session=rd.session; res=await postPush(session.access_token)}
+    }
     if(!res.ok){
       const t=await res.text().catch(()=>"");
-      err.textContent="فشل الإرسال ("+res.status+") — غالبًا دالة send-push لسه مش منشورة أو أسرار VAPID ناقصة. خطوات التشغيل في قسم 18 في supabase-setup.sql. "+t.slice(0,160);
+      err.textContent="فشل الإرسال — السيرفر رد بـ ("+res.status+")"+(t?": "+t.slice(0,200):"");
       return;
     }
     const j=await res.json();
@@ -660,7 +668,7 @@ async function sendPushStatic(){
     adminFlash="اتبعت الإشعار ✓ — وصل لـ "+(j.sent??0)+" من "+(j.total??0)+" جهاز";
     render();
   }catch(e){
-    err.textContent="فشل الاتصال بدالة الإرسال — الدالة send-push لسه مش منشورة غالبًا (قسم 18 في supabase-setup.sql)";
+    err.textContent="فشل الاتصال بدالة الإرسال — "+((e&&e.message)?e.message:String(e));
   }
 }
 function questionGroupsHtml(items){
