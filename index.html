@@ -811,6 +811,7 @@ function renderAdmin(){
     <label for="sub-en">اسم المادة بالإنجليزية</label><input id="sub-en" dir="ltr" style="text-align:left" maxlength="120" placeholder="Subject name">
     <label for="sub-icon">أيقونة (إيموجي)</label><input id="sub-icon" maxlength="8" value="📘" style="text-align:center">
     <button class="btn" onclick="addSubjectStatic()">➕ إضافة المادة</button>
+    <p class="meta">💾 مسودة محفوظة تلقائيًا: اللي بتكتبه هنا بيتحفظ على جهازك وانت بتكتب — لو خرجت ورجعت هتلاقيه زي ما هو، وبيتمسح بعد ما الإضافة تنجح.</p>
    </section>
    <section class="card"><h3>${editing?"تعديل عنصر":"إضافة محتوى جديد"}</h3>
     <label for="a-semester">السيمستر</label>
@@ -836,6 +837,7 @@ function renderAdmin(){
     <p id="a-err" style="color:#DC2626;font-weight:700"></p>
     <div class="row"><button class="btn" onclick="saveItem()">${editing?"💾 حفظ التعديل":"➕ إضافة"}</button>
     ${editing?`<button class="btn ghost" onclick="cancelEdit()">إلغاء</button>`:""}</div>
+    ${editing?"":`<p class="meta">💾 مسودة محفوظة تلقائيًا: اللي بتكتبه هنا بيتحفظ على جهازك وانت بتكتب — لو خرجت أو قفلت الصفحة ورجعت هتلاقيه زي ما هو، وبيتمسح لوحده بعد ما الإضافة تنجح.</p>`}
    </section>
    ${LIVE()?"":`<section class="card"><h3>نقل المحتوى</h3>
      <div class="row"><button class="btn" onclick="exportJson()">⬇️ تصدير content.json</button>
@@ -882,6 +884,7 @@ function renderAdmin(){
     <p class="meta">القسم ده عشان تنشر <b>إعلام</b> (تنبيه أو إعلان مهم): أي نص تكتبه هنا وتنشره هيظهر على طول كشريط بارز أعلى الموقع العام، وكل زائر يدخل هيشوفه — زي مواعيد امتحان أو تنبيه مهم للدفعة. تقدر تعدّل النص وتنشر من جديد، أو تلغي الإعلام خالص فيختفي من الموقع.</p>
     ${announcementText?`<div class="note ok">الإعلام المنشور حاليًا — ظاهر لكل الزوار:<br><strong>${esc(announcementText)}</strong></div>`:`<div class="note">مفيش إعلام منشور دلوقتي — الموقع العام من غير شريط إعلان.</div>`}
     <label for="ann-text">نص الإعلام</label><textarea id="ann-text" rows="3" maxlength="500" placeholder="مثال: تنبيه مهم — محاضرة بكرة اتأجلت ليوم الخميس">${annPending!==null?esc(annPending):esc(announcementText)}</textarea>
+    <p class="meta">💾 مسودة محفوظة تلقائيًا: النص بيتحفظ على جهازك وانت بتكتب — لو خرجت ورجعت هتلاقيه زي ما هو، وبيتمسح بعد النشر.</p>
     ${annConfirmPending?`<div class="note">⚠️ متأكد؟ الإعلام ده هيظهر فورًا لكل الزوار في الموقع العام.<div class="row" style="margin-top:8px"><button class="btn" onclick="publishAnnouncement()">أيوه، انشر الإعلام</button><button class="btn ghost" onclick="cancelAnnouncement()">لأ، إلغاء</button></div></div>`
     :`<button class="btn" onclick="askAnnouncement()">📢 إعلام</button>`}
     ${announcementText?(annClearPending?`<div class="note">إلغاء الإعلام خالص؟ الشريط هيختفي من الموقع العام فورًا.<div class="row" style="margin-top:8px"><button class="btn" style="background:#DC2626" onclick="clearAnnouncement()">أيوه، ألغي الإعلام</button><button class="btn ghost" onclick="cancelClearAnnouncement()">لأ</button></div></div>`
@@ -896,6 +899,7 @@ function renderAdmin(){
     <button class="btn" onclick="sendPushStatic()">📣 إرسال الإشعار لكل المشتركين</button>
    </section>`}`;
   if(adminUnlocked&&adminName())fillSubjects();
+  if(adminUnlocked&&adminName())restoreAdminDrafts();
   if(adminUnlocked&&adminName())loadSuggestionsStatic();
   if(adminUnlocked&&adminName())loadAnonAdmin();
   if(adminUnlocked&&adminName())loadPushCount();
@@ -943,12 +947,15 @@ async function publishAnnouncement(){
   const ok=await setAnnouncementRemote(annPending);
   if(!ok){annConfirmPending=false; render(); return}
   logActivity("announcement","","",annPending);
-  annPending=null; annConfirmPending=false; alert("تم نشر الإعلام ✓ وبيظهر دلوقتي لكل الزوار"); render();
+  annPending=null; annConfirmPending=false;
+  try{localStorage.removeItem("sahli-draft:announcement")}catch(e){}
+  alert("تم نشر الإعلام ✓ وبيظهر دلوقتي لكل الزوار"); render();
 }
 async function clearAnnouncement(){
   const ok=await setAnnouncementRemote("");
   annClearPending=false;
   if(!ok){render(); return}
+  try{localStorage.removeItem("sahli-draft:announcement")}catch(e){}
   logActivity("announcement_clear","","","");
   alert("تم إلغاء الإعلام ✓ واختفى من الموقع العام"); render();
 }
@@ -965,7 +972,7 @@ function addSubjectStatic(){
   const sem=document.getElementById("sub-semester").value;
   const slug=en.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||("subject-"+Date.now());
   const extra=lsGet("sahli-local-subjects",[]); extra.push({slug,ar,en,icon,semester:sem,color:"#0F766E"});
-  lsSet("sahli-local-subjects",extra); logActivity("add_subject","",slug,ar); alert("تمت إضافة المادة ✓"); render();
+  lsSet("sahli-local-subjects",extra); logActivity("add_subject","",slug,ar); try{localStorage.removeItem("sahli-draft:new-subject")}catch(e){} alert("تمت إضافة المادة ✓"); render();
 }
 async function adminUnlock(){
   const code=document.getElementById("admin-code").value.trim();
@@ -1135,11 +1142,13 @@ async function saveItem(){
     }
     if(res.error){err.textContent="فشل الحفظ: "+res.error.message;return}
     logActivity(editing?"update":"add",d.kind,d.subject_slug,d.kind==="question"?d.question_text:d.title);
+    /* إضافة ناجحة = مسودة النوع + المادة دي بتتمسح (التعديل ما بيلمسش المسودات) */
+    if(!editing){try{localStorage.removeItem("sahli-draft:"+d.kind+":"+d.subject_slug)}catch(e){}}
     editing=null; await fetchAllLive(); render(); return;
   }
   let items=localItems();
   if(editing){items=items.map(i=>(i.kind===editing.kind&&String(i.id)===String(editing.id))?{...i,...d}:i);logActivity("update",d.kind,d.subject_slug,d.kind==="question"?d.question_text:d.title);editing=null}
-  else {items.unshift({id:Date.now(),created_at:new Date().toISOString(),...d});logActivity("add",d.kind,d.subject_slug,d.kind==="question"?d.question_text:d.title)}
+  else {items.unshift({id:Date.now(),created_at:new Date().toISOString(),...d});logActivity("add",d.kind,d.subject_slug,d.kind==="question"?d.question_text:d.title);try{localStorage.removeItem("sahli-draft:"+d.kind+":"+d.subject_slug)}catch(e){}}
   saveLocal(items);render();
 }
 function editItem(kind,id){
@@ -1161,6 +1170,98 @@ function editItem(kind,id){
   window.scrollTo({top:0,behavior:"smooth"});
 }
 function cancelEdit(){editing=null;render()}
+/* ---------------- مسودات نماذج الأدمن (حفظ تلقائي محلي) ----------------
+   كل نموذج إضافة في صفحة الأدمن بيحفظ مسودته في localStorage وهو
+   بيتكتب (debounce ~300ms) بمفتاح لكل نوع + مادة
+   (sahli-draft:<kind>:<subject-slug>)، فلو الأدمن خرج أو قفل التاب
+   قبل ما يدوس «إضافة» يرجع يلاقي كلامه زي ما هو. المسودة بتتمسح
+   بعد إضافة ناجحة، ووضع التعديل (editing) ما بيقراش ولا يكتب أي
+   مسودة أبدًا. الاسترجاع بيتم في restoreAdminDrafts آخر كل رسم
+   لصفحة الأدمن، وتبديل النوع/المادة/السيمستر بيحمّل مسودة التركيبة
+   الجديدة فورًا (أو يفضّي النموذج) عشان المسودات ما تختلطش. */
+let draftTimer=null, subjectDraftTimer=null, annDraftTimer=null;
+const DRAFT_FIELD_IDS=["a-title","a-url","a-type","a-filecat","a-desc","a-q","a-answer","a-topic","a-img"];
+function draftEl(id){return document.getElementById(id)}
+function currentDraftKey(){
+  const k=draftEl("a-kind"),s=draftEl("a-subject");
+  if(!k||!s||!s.value)return null;
+  return "sahli-draft:"+k.value+":"+s.value;
+}
+function collectDraft(){
+  const g=id=>{const e=draftEl(id);return e?e.value:""};
+  return {title:g("a-title"),url:g("a-url"),fileType:g("a-type")||"PDF",fileCategory:g("a-filecat")||"lecture",description:g("a-desc"),questionText:g("a-q"),answerText:g("a-answer"),topic:g("a-topic"),imageUrl:g("a-img")};
+}
+function draftIsEmptyD(d){return !d.title&&!d.url&&!d.description&&!d.questionText&&!d.answerText&&!d.topic&&!d.imageUrl&&d.fileType==="PDF"&&d.fileCategory==="lecture"}
+function saveContentDraftNow(){
+  if(editing)return;
+  const key=currentDraftKey(); if(!key)return;
+  const d=collectDraft();
+  if(draftIsEmptyD(d)){try{localStorage.removeItem(key)}catch(e){}}
+  else lsSet(key,d);
+  const sem=draftEl("a-semester"),kind=draftEl("a-kind"),sub=draftEl("a-subject");
+  if(sem&&kind&&sub&&sub.value)lsSet("sahli-draft:last",{kind:kind.value,subjectSlug:sub.value,semesterSlug:sem.value});
+}
+function applyContentDraft(){
+  if(editing)return;
+  const key=currentDraftKey(); if(!key)return;
+  const d=lsGet(key,null)||{title:"",url:"",fileType:"PDF",fileCategory:"lecture",description:"",questionText:"",answerText:"",topic:"",imageUrl:""};
+  const set=(id,v)=>{const e=draftEl(id);if(e)e.value=v};
+  set("a-title",d.title||""); set("a-url",d.url||"");
+  set("a-type",d.fileType||"PDF"); set("a-filecat",d.fileCategory||"lecture");
+  set("a-desc",d.description||""); set("a-q",d.questionText||"");
+  set("a-answer",d.answerText||""); set("a-topic",d.topic||""); set("a-img",d.imageUrl||"");
+}
+function saveSubjectDraftNow(){
+  const g=id=>{const e=draftEl(id);return e?e.value:""};
+  const d={semester:g("sub-semester"),nameAr:g("sub-ar"),nameEn:g("sub-en"),icon:g("sub-icon")};
+  if(!d.nameAr&&!d.nameEn&&(!d.icon||d.icon==="📘")){try{localStorage.removeItem("sahli-draft:new-subject")}catch(e){}}
+  else lsSet("sahli-draft:new-subject",d);
+}
+function saveAnnDraftNow(){
+  const e=draftEl("ann-text"); if(!e)return;
+  try{
+    if(e.value.trim())localStorage.setItem("sahli-draft:announcement",e.value);
+    else localStorage.removeItem("sahli-draft:announcement");
+  }catch(err){}
+}
+function restoreAdminDrafts(){
+  if(editing)return;
+  /* آخر اختيار (سيمستر/مادة/نوع) عشان مسودة النوع والمادة اللي
+     الأدمن كان واقف عليهم تتحمّل على طول أول ما يفتح صفحة الأدمن */
+  const last=lsGet("sahli-draft:last",null);
+  const semSel=draftEl("a-semester"),subSel=draftEl("a-subject"),kindSel=draftEl("a-kind");
+  if(last&&semSel&&subSel&&kindSel){
+    if([...semSel.options].some(o=>o.value===last.semesterSlug)){semSel.value=last.semesterSlug;fillSubjects()}
+    if([...subSel.options].some(o=>o.value===last.subjectSlug))subSel.value=last.subjectSlug;
+    if([...kindSel.options].some(o=>o.value===last.kind)){kindSel.value=last.kind;kindChanged()}
+  }
+  applyContentDraft();
+  /* مسودة نموذج إضافة مادة */
+  const sd=lsGet("sahli-draft:new-subject",null);
+  if(sd){
+    const ss=draftEl("sub-semester"); if(ss&&[...ss.options].some(o=>o.value===sd.semester))ss.value=sd.semester;
+    const sa=draftEl("sub-ar"); if(sa)sa.value=sd.nameAr||"";
+    const se=draftEl("sub-en"); if(se)se.value=sd.nameEn||"";
+    const si=draftEl("sub-icon"); if(si)si.value=sd.icon||"📘";
+  }
+  /* مسودة نص الإعلام — annPending (نص مستني تأكيد النشر) ليه الأولوية */
+  if(annPending===null){
+    let ad=null; try{ad=localStorage.getItem("sahli-draft:announcement")}catch(e){}
+    const at=draftEl("ann-text"); if(at&&ad)at.value=ad;
+  }
+}
+document.addEventListener("input",e=>{
+  const id=e.target&&e.target.id; if(!id)return;
+  if(DRAFT_FIELD_IDS.includes(id)){clearTimeout(draftTimer);draftTimer=setTimeout(saveContentDraftNow,300)}
+  else if(id==="sub-ar"||id==="sub-en"||id==="sub-icon"){clearTimeout(subjectDraftTimer);subjectDraftTimer=setTimeout(saveSubjectDraftNow,300)}
+  else if(id==="ann-text"){clearTimeout(annDraftTimer);annDraftTimer=setTimeout(saveAnnDraftNow,300)}
+});
+document.addEventListener("change",e=>{
+  const id=e.target&&e.target.id; if(!id)return;
+  if(id==="a-type"||id==="a-filecat"){clearTimeout(draftTimer);draftTimer=setTimeout(saveContentDraftNow,300)}
+  if(id==="a-kind"||id==="a-subject"||id==="a-semester"){if(!editing)applyContentDraft()}
+  if(id==="sub-semester"){clearTimeout(subjectDraftTimer);subjectDraftTimer=setTimeout(saveSubjectDraftNow,300)}
+});
 async function deleteItem(kind,id){
   /* التأكيد بنافذة داخلية (askConfirm) — الحذف ما بيتنفذش غير لو
      الأدمن ضغط «حذف» جوّه النافذة، وبعدها بتظهر رسالة نجاح خضراء
