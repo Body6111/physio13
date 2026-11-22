@@ -818,7 +818,7 @@ function renderAdmin(){
    ${items.length===0?`<div class="empty">مفيش محتوى لسه.</div>`:adminOrdered.map(i=>{const gp=groupPosOf[i.kind+":"+i.id]||{idx:0,size:1};return `<div class="card"><div class="row" style="justify-content:space-between">
      <div><strong>${KIND_ICONS[i.kind]||"📄"} ${esc(i.kind==="question"?(i.question_text||""):i.title)}</strong>
      <div class="meta">${esc(subj(i.subject_slug).ar)} · ${i.kind}</div></div>
-     <div class="row"><button class="btn ghost" ${gp.idx<=0?"disabled":""} onclick="moveItem('${i.kind}',${i.id},'up')" aria-label="نقل لأعلى">↑</button><button class="btn ghost" ${gp.idx>=gp.size-1?"disabled":""} onclick="moveItem('${i.kind}',${i.id},'down')" aria-label="نقل لأسفل">↓</button><button class="btn ghost" onclick="editItem('${i.kind}',${i.id})">✏️ تعديل</button><button class="btn ghost" style="color:#DC2626" onclick="deleteItem('${i.kind}',${i.id})">🗑 حذف</button></div></div></div>`}).join("")}
+     <div class="row"><button class="btn ghost" ${gp.idx<=0?"disabled":""} onclick="moveItem('${i.kind}','${i.id}','up')" aria-label="نقل لأعلى">↑</button><button class="btn ghost" ${gp.idx>=gp.size-1?"disabled":""} onclick="moveItem('${i.kind}','${i.id}','down')" aria-label="نقل لأسفل">↓</button><button class="btn ghost" onclick="editItem('${i.kind}','${i.id}')">✏️ تعديل</button><button class="btn ghost" style="color:#DC2626" onclick="deleteItem('${i.kind}','${i.id}')">🗑 حذف</button></div></div></div>`}).join("")}
    </section>
    <section class="card"><h3>💡 اقتراحات من الزوار</h3>
     <p class="meta">مصادر بيقترحها الطلاب من زرار «شارك وساعد» في صفحات المواد. القبول بيضيف المصدر للمادة تلقائيًا، والرفض بيشيله من الانتظار — والاتنين بيتسجلوا باسمك.</p>
@@ -1110,12 +1110,12 @@ async function saveItem(){
     editing=null; await fetchAllLive(); render(); return;
   }
   let items=localItems();
-  if(editing){items=items.map(i=>(i.kind===editing.kind&&i.id===editing.id)?{...i,...d}:i);logActivity("update",d.kind,d.subject_slug,d.kind==="question"?d.question_text:d.title);editing=null}
+  if(editing){items=items.map(i=>(i.kind===editing.kind&&String(i.id)===String(editing.id))?{...i,...d}:i);logActivity("update",d.kind,d.subject_slug,d.kind==="question"?d.question_text:d.title);editing=null}
   else {items.unshift({id:Date.now(),created_at:new Date().toISOString(),...d});logActivity("add",d.kind,d.subject_slug,d.kind==="question"?d.question_text:d.title)}
   saveLocal(items);render();
 }
 function editItem(kind,id){
-  const i=(LIVE()?published:localItems()).find(x=>x.kind===kind&&x.id===id);if(!i)return;
+  const i=(LIVE()?published:localItems()).find(x=>x.kind===kind&&String(x.id)===String(id));if(!i)return;
   editing={kind,id};render();
   const s0=subj(i.subject_slug);
   const semSel=document.getElementById("a-semester"); if(semSel){semSel.value=s0.semester||"semester-1"; fillSubjects();}
@@ -1137,7 +1137,7 @@ async function deleteItem(kind,id){
   /* التأكيد بنافذة داخلية (askConfirm) — الحذف ما بيتنفذش غير لو
      الأدمن ضغط «حذف» جوّه النافذة، وبعدها بتظهر رسالة نجاح خضراء
      أعلى صفحة الأدمن (أو رسالة خطأ واضحة لو الحذف فشل) */
-  const it=(LIVE()?published:localItems()).find(x=>x.kind===kind&&x.id===id);
+  const it=(LIVE()?published:localItems()).find(x=>x.kind===kind&&String(x.id)===String(id));
   if(!(await askConfirm("حذف «"+(it?(kind==="question"?it.question_text:it.title):"العنصر")+"» نهائيًا؟")))return;
   if(LIVE()){
     if(!session){alert(WRITE_SESSION_MSG);return}
@@ -1149,17 +1149,17 @@ async function deleteItem(kind,id){
   }
   if(it)logActivity("delete",kind,it.subject_slug,it.kind==="question"?it.question_text:it.title);
   adminFlash="تم حذف العنصر ✓ واتشال من المادة";
-  saveLocal(localItems().filter(i=>!(i.kind===kind&&i.id===id)));render();
+  saveLocal(localItems().filter(i=>!(i.kind===kind&&String(i.id)===String(id))));render();
 }
 /* ترتيب العرض: نقل عنصر خطوة لأعلى/لأسفل جوه مجموعته (مادة + نوع +
    محاضرة/سكشن) — المجموعة بتتعدّ ترقيمها (١٠، ٢٠، ٣٠...) وتتحفظ،
    فالترتيب الجديد هو اللي بيظهر للطلاب في صفحة المادة */
 async function moveItem(kind,id,dir){
   const src=LIVE()?published:localItems();
-  const it=src.find(x=>x.kind===kind&&x.id===id); if(!it)return;
+  const it=src.find(x=>x.kind===kind&&String(x.id)===String(id)); if(!it)return;
   const cat=it.file_category||"lecture";
   const group=src.filter(x=>x.subject_slug===it.subject_slug&&x.kind===kind&&(x.file_category||"lecture")===cat).sort(byDisplayOrder);
-  const idx=group.findIndex(x=>x.kind===kind&&x.id===id);
+  const idx=group.findIndex(x=>x.kind===kind&&String(x.id)===String(id));
   const swap=dir==="up"?idx-1:idx+1;
   if(idx<0||swap<0||swap>=group.length)return;
   const reordered=[...group]; const mv=reordered.splice(idx,1)[0]; reordered.splice(swap,0,mv);
@@ -1174,7 +1174,7 @@ async function moveItem(kind,id,dir){
     logActivity("move",kind,it.subject_slug,kind==="question"?it.question_text:it.title);
     await fetchAllLive(); render(); return;
   }
-  const all=localItems().map(x=>{const g=reordered.find(r=>r.kind===x.kind&&r.id===x.id);return g?{...x,sort_order:g.sort_order}:x});
+  const all=localItems().map(x=>{const g=reordered.find(r=>r.kind===x.kind&&String(r.id)===String(x.id));return g?{...x,sort_order:g.sort_order}:x});
   saveLocal(all);
   logActivity("move",kind,it.subject_slug,kind==="question"?it.question_text:it.title);
   render();
@@ -1295,7 +1295,7 @@ async function loadSuggestionsStatic(){
     ${r.kind==="question"&&r.answer_text?`<div class="meta">الإجابة المقترحة: ${esc(r.answer_text)}</div>`:""}
     ${r.kind==="question"&&r.topic?`<div class="meta">🏷 الموضوع: ${esc(r.topic)}</div>`:""}
     ${r.kind==="question"&&r.image_url?`<div class="meta" dir="ltr" style="text-align:left">🖼 ${esc(r.image_url)}</div>`:""}
-    <div class="row" style="margin-top:6px"><button class="btn" onclick="reviewSuggestion(${r.id},true,${r.live?1:0})">✓ قبول وإضافة</button><button class="btn ghost" style="color:#DC2626" onclick="reviewSuggestion(${r.id},false,${r.live?1:0})">✗ رفض</button></div></div>`).join("");
+    <div class="row" style="margin-top:6px"><button class="btn" onclick="reviewSuggestion('${r.id}',true,${r.live?1:0})">✓ قبول وإضافة</button><button class="btn ghost" style="color:#DC2626" onclick="reviewSuggestion('${r.id}',false,${r.live?1:0})">✗ رفض</button></div></div>`).join("");
 }
 async function reviewSuggestion(id,accept,live){
   if(!accept&&!(await askConfirm("رفض الاقتراح ده وحذفه من قائمة الانتظار؟")))return;
@@ -1315,7 +1315,7 @@ async function reviewSuggestion(id,accept,live){
     if(!accept)adminFlash="تم رفض الاقتراح وحذفه من قائمة الانتظار ✓";
     await fetchAllLive(); render(); return;
   }
-  let arr=lsGet("sahli-suggestions",[]); const sg=arr.find(x=>x.id===id); if(!sg)return;
+  let arr=lsGet("sahli-suggestions",[]); const sg=arr.find(x=>String(x.id)===String(id)); if(!sg)return;
   if(accept){
     const items=localItems(); items.unshift({id:Date.now(),created_at:new Date().toISOString(),subject_slug:sg.subject_slug,kind:sg.kind,title:sg.title,url:sg.url,file_type:null,file_category:sg.file_category||"lecture",description:null,question_text:sg.question_text,answer_text:sg.answer_text,topic:sg.topic||null,image_url:sg.image_url||null}); saveLocal(items);
   }
