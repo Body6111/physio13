@@ -336,7 +336,7 @@ async function refreshNow(force){
 window.addEventListener("online",()=>{refreshNow(true)});
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&navigator.onLine)refreshNow(false)});
 function isImageItem(i){if(!i.url)return false;if(i.kind!=="file"&&i.kind!=="summary")return false;const ft=(i.file_type||"").toLowerCase();if(/\.(png|jpe?g|gif|webp|svg|bmp)(\?|#|$)/i.test(i.url))return true;return ft.includes("صور")||ft.includes("image")}
-function counts(slug){const l=bySubject(slug);return{v:l.filter(i=>i.kind==="video").length,r:l.filter(i=>i.kind==="recording").length,f:l.filter(i=>i.kind==="file").length,im:l.filter(isImageItem).length,s:l.filter(i=>i.kind==="summary").length,q:l.filter(i=>i.kind==="question").length}}
+function counts(slug){const l=bySubject(slug);return{v:l.filter(i=>i.kind==="video").length,r:l.filter(i=>i.kind==="recording").length,f:l.filter(i=>i.kind==="file"&&!isImageItem(i)).length,im:l.filter(isImageItem).length,s:l.filter(i=>i.kind==="summary").length,q:l.filter(i=>i.kind==="question").length}}
 /* ---------------- متتبع المذاكرة: تقدم الطالب في localStorage (من غير تسجيل دخول) ---------------- */
 const doneKeys=()=>lsGet("sahli-progress",[]);
 const isDone=(kind,id)=>doneKeys().includes(kind+":"+id);
@@ -881,7 +881,7 @@ function renderSubject(){
   const s=subj(view.slug),c=counts(s.slug);
   if(dataReady)logVisit("مادة: "+s.slug);
   const img=SUBJECT_IMAGES[s.slug];
-  const all=tab==="image"?bySubject(s.slug).filter(isImageItem):bySubject(s.slug).filter(i=>i.kind===tab);
+  const all=tab==="image"?bySubject(s.slug).filter(isImageItem):tab==="file"?bySubject(s.slug).filter(i=>i.kind==="file"&&!isImageItem(i)):bySubject(s.slug).filter(i=>i.kind===tab);
   const items=all.slice(0,visible), total=all.length;
   const labels={video:"🎬 فيديوهات",recording:"🎙️ ريكوردات",file:"📁 ملفات",image:"🖼️ صور",summary:"📝 ملخصات",question:"❓ أسئلة"};
   const tabCount={video:c.v,recording:c.r,file:c.f,image:c.im,summary:c.s,question:c.q};
