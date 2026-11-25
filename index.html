@@ -180,6 +180,7 @@ function logActivity(action,kind,subject_slug,item_title){
 }
 let published=[];            // صفوف موحّدة الشكل من جداول Supabase (أو content.json احتياطيًا)
 let examsList=[], anonAll=[], featuresOpen=false, anonAsked=false, homeQuery="";
+let planOpen=false, planExamId=null;
 let sb=null;                 // عميل Supabase
 let session=null;            // جلسة الأدمن (Supabase Auth)
 let adminUnlocked=false;     // بوابة كود الأدمن (التحقق من السيرفر عبر RPC)
@@ -399,6 +400,8 @@ function cdTick(){
 }
 setInterval(cdTick,1000);
 /* ---------------- خطة المذاكرة المقترحة ----------------
+   صندوق مطوي افتراضيًا: الطالب يضغط عليه فتظهر اختيارات المواد اللي
+   ليها امتحانات جاية، ويختار مادة فتظهر خطة مذاكرتها بس.
    خطة يوم بيوم بتتبني لحظيًا من جدول الامتحانات الحي وعدد عناصر كل
    مادة الفعلي: كل مادة بتاخد أيام مذاكرة فعلية (يومين على الأقل)
    بنطاق عناصر محدد قبل امتحانها، ولو الفترة اللي قبل امتحانها قصيرة
@@ -407,9 +410,18 @@ setInterval(cdTick,1000);
    وصف مستقل ليوم الامتحان نفسه.
    كل الأيام بتتحسب بتوقيت القاهرة زي العدّاد بالظبط. */
 function cairoDayMs(d){const parts=new Intl.DateTimeFormat("en-US",{timeZone:EXAM_TZ,year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(d);const g=t=>Number((parts.find(p=>p.type===t)||{}).value||0);return Date.UTC(g("year"),g("month")-1,g("day"))}
+function toggleStudyPlan(){planOpen=!planOpen;if(!planOpen)planExamId=null;render()}
+function pickPlanExam(id){planExamId=String(id);render()}
+function clearPlanExam(){planExamId=null;render()}
 function studyPlanHtml(){
-  if(!dataReady)return `<section style="margin-top:20px"><h2 style="margin:0 0 4px">🗓️ خطة المذاكرة المقترحة</h2>
-  <div class="skel" style="height:150px;margin-top:10px" role="status" aria-label="جاري تجهيز خطة المذاكرة"></div></section>`;
+  const boxHead=`<button class="card" style="width:100%;text-align:right;display:flex;align-items:center;gap:12px" onclick="toggleStudyPlan()" aria-expanded="${planOpen}" aria-label="${planOpen?"إغلاق خطة المذاكرة المقترحة":"فتح خطة المذاكرة المقترحة واختيار المادة"}">
+    <span style="font-size:24px">🗓️</span>
+    <span style="flex:1;min-width:0"><span style="display:block;font-size:18px;font-weight:900">خطة المذاكرة المقترحة</span>
+    <span class="meta" style="display:block">اضغط هنا واختر المادة — هيطلعلك اقتراح مذاكرتها يوم بيوم لحد امتحانها</span></span>
+    <span style="font-weight:900;color:var(--accent);font-size:18px">${planOpen?"▴":"▾"}</span>
+  </button>`;
+  if(!dataReady)return `<section style="margin-top:20px">${boxHead}
+  <div class="skel" style="height:64px;margin-top:10px" role="status" aria-label="جاري تجهيز خطة المذاكرة"></div></section>`;
   const DAY=86400000, todayMs=cairoDayMs(new Date());
   const subs=allSubjects();
   const planned=examsList.filter(e=>e.subject_slug&&subs.some(s=>s.slug===e.subject_slug)&&cairoDayMs(new Date(e.exam_date))>=todayMs);
@@ -469,16 +481,25 @@ function studyPlanHtml(){
         <div class="meta" style="${d.kind==="exam"?"color:rgba(255,255,255,.85)":""}">${esc(sub)}</div>
       </button>`;
     };
-    return `<div class="card">
+    return {id:String(exam.id),ar:s.ar,icon:s.icon,exam,html:`<div class="card">
       <div class="row"><span style="font-size:20px">${s.icon}</span><strong style="font-size:16px">${esc(s.ar)}</strong> <span class="pill">${EXAM_LABELS[exam.exam_type]||"📌 امتحان"}</span></div>
       <div class="meta" style="margin-top:2px">الامتحان: ${fmtExam(exam.exam_date)}</div>
       <div class="meta">${total>0?("محتوى المادة في المنصة: "+total+" عنصر — "+breakdown):"لسه مفيش محتوى مضاف للمادة دي في المنصة"}</div>
       ${days.map(dayRow).join("")}
-    </div>`;
+    </div>`};
   });
-  return `<section style="margin-top:20px"><h2 style="margin:0 0 4px">🗓️ خطة المذاكرة المقترحة</h2>
-  <p class="meta" style="line-height:1.9">خطة يوم بيوم من النهاردة لحد آخر امتحان، متقسمة حسب عدد عناصر كل مادة الموجودة في المنصة فعلًا — كل مادة ليها أيام مذاكرة قبل امتحانها، ولو امتحانها قريب من اللي قبله بنبدأ مذاكرتها بدري في الأيام الفاضية، واليوم اللي قبل كل امتحان مراجعة سريعة. اضغط على أي يوم عشان تفتح المادة وتبدأ.</p>
-  <div style="display:flex;flex-direction:column;gap:12px;margin-top:6px">${segs.join("")}</div></section>`;
+  if(!planOpen)return `<section style="margin-top:20px">${boxHead}</section>`;
+  const sel=segs.find(g=>g.id===String(planExamId));
+  const body=sel
+    ?`<button class="btn ghost" style="margin-bottom:10px" onclick="clearPlanExam()" aria-label="رجوع لاختيار مادة تانية في خطة المذاكرة">↩️ اختر مادة تانية</button>${sel.html}`
+    :`<p class="meta" style="line-height:1.9">اختر المادة اللي عايز تشوف اقتراح مذاكرتها — الخطة بتتبني يوم بيوم حسب عدد عناصر المادة في المنصة وتاريخ امتحانها، واليوم اللي قبل الامتحان مراجعة سريعة.</p>
+  <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px">${segs.map(g=>`<button class="card" style="width:100%;text-align:right;display:flex;align-items:center;gap:12px;margin-top:0" onclick="pickPlanExam('${esc(g.id)}')" aria-label="عرض اقتراح مذاكرة مادة ${esc(g.ar)} — الامتحان ${esc(fmtExam(g.exam.exam_date))}">
+    <span style="font-size:24px">${g.icon}</span>
+    <span style="flex:1;min-width:0"><span style="display:block;font-weight:900;font-size:16px">${esc(g.ar)}</span>
+    <span class="meta" style="display:block">الامتحان: ${fmtExam(g.exam.exam_date)}</span></span>
+    <span style="color:var(--accent);font-weight:900">←</span>
+  </button>`).join("")}</div>`;
+  return `<section style="margin-top:20px">${boxHead}<div style="margin-top:10px">${body}</div></section>`;
 }
 /* ---------------- زرار ؟ — مميزات المنصة ---------------- */
 const PLATFORM_FEATURES=[
