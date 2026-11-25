@@ -24,8 +24,8 @@
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}
   .subj{border:1px solid var(--border);border-radius:22px;padding:16px;text-align:right;background:var(--surface);width:100%}
   .subj .ic{font-size:28px}.subj h3{margin:8px 0 2px;font-size:18px}.subj .en2{color:var(--dim);font-size:12px;font-weight:700}.subj .counts{margin-top:8px;font-size:12px;font-weight:700;color:var(--dim)}
-  .tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:6px;margin-top:14px}
-  .tabs button{border:0;border-radius:12px;background:transparent;font-weight:800;color:var(--dim);font-size:13px;padding:8px 2px;line-height:1.5}
+  .tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:5px;margin-top:14px}
+  .tabs button{border:0;border-radius:12px;background:transparent;font-weight:800;color:var(--dim);font-size:12px;padding:8px 1px;line-height:1.5}
   .tabs button.on{background:var(--accent);color:#fff}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:14px;margin-top:12px}
   .card h3{margin:0 0 6px;font-size:16px}
@@ -335,7 +335,8 @@ async function refreshNow(force){
 }
 window.addEventListener("online",()=>{refreshNow(true)});
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&navigator.onLine)refreshNow(false)});
-function counts(slug){const l=bySubject(slug);return{v:l.filter(i=>i.kind==="video").length,r:l.filter(i=>i.kind==="recording").length,f:l.filter(i=>i.kind==="file").length,s:l.filter(i=>i.kind==="summary").length,q:l.filter(i=>i.kind==="question").length}}
+function isImageItem(i){if(!i.url)return false;if(i.kind!=="file"&&i.kind!=="summary")return false;const ft=(i.file_type||"").toLowerCase();if(/\.(png|jpe?g|gif|webp|svg|bmp)(\?|#|$)/i.test(i.url))return true;return ft.includes("صور")||ft.includes("image")}
+function counts(slug){const l=bySubject(slug);return{v:l.filter(i=>i.kind==="video").length,r:l.filter(i=>i.kind==="recording").length,f:l.filter(i=>i.kind==="file").length,im:l.filter(isImageItem).length,s:l.filter(i=>i.kind==="summary").length,q:l.filter(i=>i.kind==="question").length}}
 /* ---------------- متتبع المذاكرة: تقدم الطالب في localStorage (من غير تسجيل دخول) ---------------- */
 const doneKeys=()=>lsGet("sahli-progress",[]);
 const isDone=(kind,id)=>doneKeys().includes(kind+":"+id);
@@ -532,7 +533,7 @@ function studyPlanHtml(){
 }
 /* ---------------- زرار ؟ — مميزات المنصة ---------------- */
 const PLATFORM_FEATURES=[
- ["📚","المحتوى متقسم ومرتب بالسيمسترات والمواد (فيديوهات · ريكوردات · ملفات · ملخصات · أسئلة) وكل قسم متقسم محاضرات وسكاشن عملي — بدل ٥٠٠ رسالة متلخبطة على تليجرام تدوّر فيها بالساعات"],
+ ["📚","المحتوى متقسم ومرتب بالسيمسترات والمواد (فيديوهات · ريكوردات · ملفات · صور · ملخصات · أسئلة) وكل قسم متقسم محاضرات وسكاشن عملي — بدل ٥٠٠ رسالة متلخبطة على تليجرام تدوّر فيها بالساعات"],
  ["🔍","بحث سريع في الرئيسية يوصلّك لأي محاضرة أو دكتور أو ملف أو سؤال في ثانية واحدة"],
  ["▶️","الفيديوهات والملفات بتتفتح وبتشتغل جوّه الموقع نفسه — من غير ما تخرج ولا تضيع في روابط"],
  ["✅","متتبع مذاكرة: علّم بعلامة صح على كل محاضرة وملف ذاكرته، وشريط بيقولك خلصت كام % من كل مادة"],
@@ -606,7 +607,7 @@ function render(){
        <div class="logo-wrap"><span class="logo-ring"></span><span class="logo-ic"><svg width="36" height="36" viewBox="0 0 64 64" aria-hidden="true"><g fill="none"><circle cx="32" cy="13.5" r="5" fill="#0F766E"/><path d="M32 21 C25 29 39 33 32 43" stroke="#0F766E" stroke-width="5" stroke-linecap="round"/><polyline points="10,53 23,53 27,47 32,58 36,53 54,53" stroke="#0D9488" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></g></svg></span></div>
        <h1 style="margin-top:10px">سهّلي فيزيو</h1><div dir="ltr" style="text-align:right;opacity:.85;font-weight:700">Sahli Physio</div>
        <p style="margin:10px 0 0"><span class="pill" style="background:rgba(255,255,255,.22);color:#fff">🎓 ${esc(cohortLabel())} · كفر الشيخ</span></p>
-       <p style="line-height:1.9;margin:10px 0 0">منصة مواد العلاج الطبيعي — اختر السيمستر وادخل على مواده: فيديوهات وريكوردات وملفات وملخصات وأسئلة في مكان واحد</p>
+       <p style="line-height:1.9;margin:10px 0 0">منصة مواد العلاج الطبيعي — اختر السيمستر وادخل على مواده: فيديوهات وريكوردات وملفات وصور وملخصات وأسئلة في مكان واحد</p>
        ${LIVE()?`<p style="margin:8px 0 0;font-size:13px"><span class="live-dot"></span>المحتوى حي — بيتم تحديثه لحظيًا عبر Supabase Realtime</p>`:""}
        <p style="margin:14px 0 18px;display:flex;flex-wrap:wrap;gap:10px"><button class="btn white" onclick="go('admin')">🔐 صفحة الأدمن</button><button class="btn white" onclick="go('reminders')">⏰ تذكيراتي</button><button class="btn white" id="install-btn" onclick="installApp()" aria-label="أضف إلى الشاشة الرئيسية">📲 أضف إلى الشاشة الرئيسية</button><button class="btn white" onclick="toggleFeatures()" aria-label="مميزات المنصة — ليه سهّلي فيزيو أحسن من جروب التليجرام؟">؟ المميزات</button></p>
      </div>
@@ -715,6 +716,21 @@ function openViewer(el){
     </div></div>`;
 }
 function closeViewer(){const ov=document.getElementById("viewer-ov");if(ov)ov.innerHTML=""}
+/* قارئ نصي داخلي: بيفتح نص الملخص كامل في نافذة قراءة جوّه الموقع —
+   الملخصات النصية (اللي جاية كنص من غير ملف مرفق) كانت بتظهر كعنوان
+   وكلام بس من غير ما تتفتح؛ دلوقتي زرار «قراءة الملخص» بيفتحها هنا */
+function openTextViewer(el){
+  const title=el.getAttribute("data-title")||"";
+  const text=el.getAttribute("data-text")||"";
+  let ov=document.getElementById("viewer-ov");
+  if(!ov){ov=document.createElement("div");ov.id="viewer-ov";document.body.appendChild(ov)}
+  ov.innerHTML=`<div style="position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:12px" onclick="if(event.target===this)closeViewer()">
+    <div class="card" style="width:100%;max-width:760px;max-height:92vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+      <div class="row" style="justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border)"><strong style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📝 ${esc(title)}</strong>
+      <span class="row"><button class="btn ghost" style="color:#DC2626" onclick="closeViewer()">✕ إغلاق</button></span></div>
+      <div style="overflow:auto;padding:18px"><p style="white-space:pre-wrap;line-height:2;font-size:16px;margin:0">${esc(text)}</p></div>
+    </div></div>`;
+}
 /* نافذة تأكيد حذف داخلية (modal): كل عمليات الحذف في صفحة الأدمن
    (المحتوى الحي + رفض الاقتراحات + الامتحانات + الأسئلة المجهولة
    وردودها) بتتأكد بيها بدل نافذة confirm الأصلية — اللي كانت بتتقفل
@@ -865,24 +881,32 @@ function renderSubject(){
   const s=subj(view.slug),c=counts(s.slug);
   if(dataReady)logVisit("مادة: "+s.slug);
   const img=SUBJECT_IMAGES[s.slug];
-  const all=bySubject(s.slug).filter(i=>i.kind===tab);
+  const all=tab==="image"?bySubject(s.slug).filter(isImageItem):bySubject(s.slug).filter(i=>i.kind===tab);
   const items=all.slice(0,visible), total=all.length;
-  const labels={video:"🎬 فيديوهات",recording:"🎙️ ريكوردات",file:"📁 ملفات",summary:"📝 ملخصات",question:"❓ أسئلة"};
-  const tabCount={video:c.v,recording:c.r,file:c.f,summary:c.s,question:c.q};
+  const labels={video:"🎬 فيديوهات",recording:"🎙️ ريكوردات",file:"📁 ملفات",image:"🖼️ صور",summary:"📝 ملخصات",question:"❓ أسئلة"};
+  const tabCount={video:c.v,recording:c.r,file:c.f,image:c.im,summary:c.s,question:c.q};
   $app.innerHTML=`
    ${bannerHtml()}
    <button class="btn ghost" onclick="openSemester('${s.semester||"semester-1"}')">→ مواد السيمستر</button>
    <header class="card" style="margin-top:12px;padding:0;overflow:hidden">${img?`<img src="${img}" alt="رسم توضيحي لمادة ${esc(s.ar)}" style="width:100%;height:130px;object-fit:cover;display:block">`:""}
      <div style="padding:14px"><div style="font-size:32px">${s.icon}</div>
      <h2 style="margin:6px 0 2px">${esc(s.ar)}</h2><div class="meta" dir="ltr" style="text-align:right">${esc(s.en)}</div>
-     <div class="meta">${dataReady?(`${c.v} فيديو · ${c.r} ريكورد · ${c.f} ملف · ${c.s} ملخص · ${c.q} سؤال`):"جاري تحميل المحتوى…"}</div></div></header>
+     <div class="meta">${dataReady?(`${c.v} فيديو · ${c.r} ريكورد · ${c.f} ملف · ${c.im} صورة · ${c.s} ملخص · ${c.q} سؤال`):"جاري تحميل المحتوى…"}</div></div></header>
    ${progressBarHtml(bySubject(s.slug))}
    <nav class="tabs">${Object.keys(labels).map(k=>`<button class="${tab===k?"on":""}" onclick="setTab('${k}')">${labels[k]}${dataReady?` (${tabCount[k]})`:""}</button>`).join("")}</nav>
    ${total===0?(dataReady?`<div class="empty">لسه مفيش محتوى في القسم ده — بيتم إضافته من صفحة الأدمن وبيظهر هنا لحظيًا.</div>`:`<div class="skel" style="height:96px;margin-top:12px" role="status" aria-label="جاري تحميل محتوى القسم"></div><div class="skel" style="height:96px;margin-top:8px"></div>`):
-     (tab==="file"||tab==="recording"||tab==="summary")?fileGroupsHtml(items):tab==="question"?questionGroupsHtml(items):items.map((i,idx)=>cardHtml(i,idx)).join("")}
+     tab==="image"?imageGridHtml(items):(tab==="file"||tab==="recording"||tab==="summary")?fileGroupsHtml(items):tab==="question"?questionGroupsHtml(items):items.map((i,idx)=>cardHtml(i,idx)).join("")}
    ${visible<total?`<p style="text-align:center"><button class="btn ghost" onclick="more()">عرض المزيد (${total-visible} متبقي)</button></p>`:""}
    ${suggestHtml(s)}
    ${reminderHtml(s)}`;
+}
+function imageGridHtml(items){
+  return `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px">${items.map(i=>`<article class="card" style="padding:0;overflow:hidden;margin:0">
+    <button class="btn ghost" style="display:block;width:100%;padding:0;text-align:right" data-mode="image" data-url="${esc(i.url)}" data-title="${esc(i.title)}" onclick="openViewer(this)" aria-label="عرض صورة ${esc(i.title)} مكبّرة داخل الموقع">
+      <img src="${esc(i.url)}" alt="${esc(i.title)}" loading="lazy" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:var(--surface2)">
+      <span style="display:block;padding:8px 10px"><span style="display:block;font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(i.title)}</span>
+      <span class="pill" style="margin-top:4px">${i.file_category==="section"?"🧪 سكشن":"📚 محاضرة"}</span> <span style="font-size:12px;font-weight:800;color:var(--accent)">🔍 اضغط للتكبير</span></span>
+    </button><div style="padding:0 10px 10px">${doneCheckHtml(i)}</div></article>`).join("")}</div>`;
 }
 function fileGroupsHtml(items){
   return ["lecture","section"].map(cat=>{
@@ -901,7 +925,7 @@ function cardHtml(i,idx){
     ${doneCheckHtml(i)}</article>`}
   if(i.kind==="summary")return `<article class="card"><h3>📝 ${esc(i.title)}</h3>
     <div class="row"><span class="pill" style="background:var(--accent);color:#fff">${i.file_category==="section"?"🧪 سكشن":"📚 محاضرة"}</span>${i.file_type?`<span class="pill">${esc(i.file_type)}</span>`:""}</div>
-    ${i.description?`<div class="meta" style="margin-top:6px">${esc(i.description)}</div>`:""}
+    ${i.description?`<div class="meta" style="margin-top:6px">${esc(i.description)}</div><p class="row"><button class="btn" data-title="${esc(i.title)}" data-text="${esc(i.description)}" onclick="openTextViewer(this)">📖 قراءة الملخص</button></p>`:""}
     ${i.url?`<p class="row"><button class="btn" data-mode="iframe" data-ft="${esc(i.file_type||"")}" data-url="${esc(i.url)}" data-title="${esc(i.title)}" onclick="openViewer(this)">👁 عرض الملخص هنا</button><a class="btn ghost" target="_blank" rel="noopener" href="${esc(i.url)}">فتح / تحميل ↗</a></p>`:""}
     ${doneCheckHtml(i)}</article>`;
   if(i.kind==="video"){const yt=ytId(i.url);const tg=tgPost(i.url);return `<article class="card">
