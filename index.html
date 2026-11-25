@@ -637,7 +637,10 @@ function render(){
   cdTick();
   studyChipRender();
 }
-function bannerHtml(){return announcementText?`<div class="card" role="region" aria-label="إعلان من إدارة المنصة" style="border:2px solid #B45309;background:#F59E0B;color:#451A03;margin-bottom:12px;box-shadow:0 4px 14px rgba(180,83,9,.35)"><strong>📢 ${esc(announcementText)}</strong></div>`:""}
+/* شريط الحداد الأسود: حدادًا على ضحايا وشهداء الوراق — يظهر ٤٨ ساعة من ٢٦ نوفمبر ٢٠٢٦ ويختفي تلقائيًا بعدها */
+const MOURNING_END_MS=new Date("2026-11-28T00:05:00+02:00").getTime();
+function mourningHtml(){return Date.now()<MOURNING_END_MS?`<div class="card" role="region" aria-label="حداد على ضحايا وشهداء الوراق" style="background:#000;color:#fff;text-align:center;margin-bottom:12px;padding:16px;box-shadow:0 4px 14px rgba(0,0,0,.35)"><div style="font-size:19px;font-weight:900;line-height:1.7">رحم الله ضحايا وشهداء الوراق</div><div style="font-size:14px;font-weight:700;color:rgba(255,255,255,.7)">إنا لله وإنا إليه راجعون</div></div>`:""}
+function bannerHtml(){const a=announcementText?`<div class="card" role="region" aria-label="إعلان من إدارة المنصة" style="border:2px solid #B45309;background:#F59E0B;color:#451A03;margin-bottom:12px;box-shadow:0 4px 14px rgba(180,83,9,.35)"><strong>📢 ${esc(announcementText)}</strong></div>`:"";return mourningHtml()+a}
 function openSemester(slug){view={name:"semester",slug};render()}
 function renderSemester(){
   const sem=allSemesters().find(s=>s.slug===view.slug)||allSemesters()[0];
