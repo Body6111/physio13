@@ -181,6 +181,7 @@ function logActivity(action,kind,subject_slug,item_title){
 let published=[];            // صفوف موحّدة الشكل من جداول Supabase (أو content.json احتياطيًا)
 let examsList=[], anonAll=[], featuresOpen=false, anonAsked=false, homeQuery="";
 let planOpen=false, planExamId=null;
+let scheduleOpen=false, scheduleExamId=null;
 let sb=null;                 // عميل Supabase
 let session=null;            // جلسة الأدمن (Supabase Auth)
 let adminUnlocked=false;     // بوابة كود الأدمن (التحقق من السيرفر عبر RPC)
@@ -375,21 +376,49 @@ const EXAM_TZ="Africa/Cairo";
 function cairoOffsetMs(at){const parts=new Intl.DateTimeFormat("en-US",{timeZone:EXAM_TZ,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(at);const get=t=>Number((parts.find(p=>p.type===t)||{}).value||0);const asUTC=Date.UTC(get("year"),get("month")-1,get("day"),get("hour")%24,get("minute"),get("second"));return asUTC-Math.floor(at.getTime()/1000)*1000}
 function cairoLocalToIso(local){const dp=(local||"").split("T"),datePart=dp[0]||"",timePart=dp[1]||"00:00";const dd=datePart.split("-").map(Number),tt=timePart.split(":").map(Number);const y=dd[0]||1970,mo=dd[1]||1,d=dd[2]||1,h=tt[0]||0,mi=tt[1]||0;const wallAsUTC=Date.UTC(y,mo-1,d,h,mi);let instant=wallAsUTC;for(let i=0;i<3;i++){const next=wallAsUTC-cairoOffsetMs(new Date(instant));if(next===instant)break;instant=next}return new Date(instant).toISOString()}
 const EXAM_LABELS={midterm:"📝 ميدتيرم",practical:"🧪 عملي",final:"🎓 فاينال",other:"📌 امتحان"};
+function toggleSchedule(){scheduleOpen=!scheduleOpen;if(!scheduleOpen)scheduleExamId=null;render()}
+function pickScheduleExam(id){scheduleExamId=String(id);render()}
+function clearScheduleExam(){scheduleExamId=null;render()}
 function examsHtml(){
   if(!dataReady)return `<section style="margin-top:20px"><h2 style="margin:0 0 4px">⏳ الامتحانات الجاية</h2>
   <div class="skel" style="height:118px;margin-top:10px" role="status" aria-label="جاري تحميل الامتحانات"></div>
-  <div class="skel" style="height:64px;margin-top:8px"></div>
   <div class="skel" style="height:64px;margin-top:8px"></div></section>`;
   const now=Date.now();
   const up=examsList.filter(e=>new Date(e.exam_date).getTime()>now);
   const past=examsList.filter(e=>new Date(e.exam_date).getTime()<=now);
   const next=up[0];
   const fmt=iso=>new Date(iso).toLocaleString("ar-EG",{timeZone:EXAM_TZ,weekday:"long",day:"numeric",month:"long",hour:"numeric",minute:"2-digit"});
-  const row=(e,isPast)=>{const s=e.subject_slug?allSubjects().find(x=>x.slug===e.subject_slug):null;return `<div class="card" style="${isPast?"opacity:.6;":""}margin-top:8px"><div class="row"><span style="font-size:22px">${s?s.icon:"📅"}</span><div style="flex:1;min-width:0"><strong>${esc(e.title)}</strong> <span class="pill">${EXAM_LABELS[e.exam_type]||"📌 امتحان"}</span>${isPast?` <span class="pill">انتهى</span>`:""}<div class="meta">${s?esc(s.ar)+" · ":""}${fmt(e.exam_date)}</div>${e.note?`<div class="meta">📝 ${esc(e.note)}</div>`:""}</div>${e.subject_slug?`<button class="btn ghost" onclick="openSubject('${e.subject_slug}')">افتح المادة</button>`:""}</div></div>`};
+  /* جدول الامتحانات بقى صندوق مطوي زي خطة المذاكرة بالظبط: الطالب يضغط
+     عليه فتظهر اختيارات الامتحانات، ويختار امتحان فتظهر تفاصيله بس */
+  const boxHead=`<button class="card" style="width:100%;text-align:right;display:flex;align-items:center;gap:12px;margin-top:12px" onclick="toggleSchedule()" aria-expanded="${scheduleOpen}" aria-label="${scheduleOpen?"إغلاق جدول الامتحانات":"فتح جدول الامتحانات واختيار الامتحان"}">
+    <span style="font-size:24px">📅</span>
+    <span style="flex:1;min-width:0"><span style="display:block;font-size:18px;font-weight:900">جدول الامتحانات</span>
+    <span class="meta" style="display:block">اضغط هنا واختر الامتحان — هيطلعلك موعده وتفاصيله</span></span>
+    <span style="font-weight:900;color:var(--accent);font-size:18px">${scheduleOpen?"▴":"▾"}</span>
+  </button>`;
+  const allRows=[...up.map(e=>({e,isPast:false})),...past.map(e=>({e,isPast:true}))];
+  const selRow=allRows.find(r=>String(r.e.id)===String(scheduleExamId));
+  const detailHtml=(e,isPast)=>{const s=e.subject_slug?allSubjects().find(x=>x.slug===e.subject_slug):null;const diff=Math.max(0,new Date(e.exam_date).getTime()-now);const rd=Math.floor(diff/86400000),rh=Math.floor(diff/3600000)%24,rm=Math.floor(diff/60000)%60;return `<div class="card">
+    <div class="row"><span style="font-size:20px">${s?s.icon:"📅"}</span><strong style="font-size:16px">${esc(e.title)}</strong> <span class="pill">${EXAM_LABELS[e.exam_type]||"📌 امتحان"}</span>${isPast?` <span class="pill">انتهى</span>`:""}</div>
+    ${s?`<div class="meta" style="margin-top:2px">المادة: ${esc(s.ar)}</div>`:""}
+    <div class="meta">الموعد: ${fmt(e.exam_date)}</div>
+    ${isPast?"":`<div class="meta">⏳ فاضل عليه: ${rd>0?rd+" يوم و":""}${rh} ساعة و${rm} دقيقة</div>`}
+    ${e.note?`<div class="meta">📝 ${esc(e.note)}</div>`:""}
+    ${e.subject_slug?`<button class="btn" style="margin-top:10px" onclick="openSubject('${e.subject_slug}')" aria-label="فتح مادة ${esc(s?s.ar:"")} — محتوى امتحان ${esc(e.title)}">افتح المادة ←</button>`:""}
+  </div>`};
+  const scheduleBody=!scheduleOpen?""
+    :selRow?`<div style="margin-top:10px"><button class="btn ghost" style="margin-bottom:10px" onclick="clearScheduleExam()" aria-label="رجوع لاختيار امتحان تاني في جدول الامتحانات">↩️ اختر امتحان تاني</button>${detailHtml(selRow.e,selRow.isPast)}</div>`
+    :`<div style="margin-top:10px"><p class="meta" style="line-height:1.9">اختر الامتحان اللي عايز تشوف تفاصيله — المواعيد بتوقيت القاهرة، والامتحانات اللي عدّت بتظهر باهتة تحت.</p>
+  <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px">${allRows.map(({e,isPast})=>{const s=e.subject_slug?allSubjects().find(x=>x.slug===e.subject_slug):null;return `<button class="card" style="width:100%;text-align:right;display:flex;align-items:center;gap:12px;margin-top:0;${isPast?"opacity:.6;":""}" onclick="pickScheduleExam('${esc(String(e.id))}')" aria-label="عرض تفاصيل امتحان ${esc(e.title)} — ${esc(fmt(e.exam_date))}${isPast?" (انتهى)":""}">
+    <span style="font-size:24px">${s?s.icon:"📅"}</span>
+    <span style="flex:1;min-width:0"><span style="display:block;font-weight:900;font-size:16px">${esc(e.title)} <span class="pill">${EXAM_LABELS[e.exam_type]||"📌 امتحان"}</span>${isPast?` <span class="pill">انتهى</span>`:""}</span>
+    <span class="meta" style="display:block">${s?esc(s.ar)+" · ":""}${fmt(e.exam_date)}</span></span>
+    <span style="color:var(--accent);font-weight:900">←</span>
+  </button>`}).join("")}</div></div>`;
   return `<section style="margin-top:20px"><h2 style="margin:0 0 4px">⏳ الامتحانات الجاية</h2>
   ${examsList.length===0?`<div class="empty">لسه مفيش امتحانات متسجلة — أول ما الأدمن يضيف مواعيد الميدتيرم والعملي والفاينال هتظهر هنا مع عدّاد تنازلي لأقرب امتحان.</div>`
   :`${next?`<div class="card" style="background:#7C2D12;color:#fff;border:0"><div style="font-weight:800;opacity:.92">⏳ فاضل على أقرب امتحان — ${esc(next.title)}</div><div id="cd-box" data-date="${esc(next.exam_date)}" style="margin-top:10px"></div><div class="meta" style="color:#fff;opacity:.9;margin-top:8px">${fmt(next.exam_date)}</div></div>`:`<div class="note ok">كل الامتحانات المسجلة عدّت — بالتوفيق في النتيجة! 🎉</div>`}
-  <h3 style="margin:14px 0 2px">📅 جدول الامتحانات</h3>${up.map(e=>row(e,false)).join("")}${past.map(e=>row(e,true)).join("")}`}
+  ${boxHead}${scheduleBody}`}
   </section>`;
 }
 function cdTick(){
