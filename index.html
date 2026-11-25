@@ -51,6 +51,10 @@
   @keyframes float-y{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
   @keyframes fade-up{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
   @keyframes hero-zoom{from{opacity:0;transform:scale(1.06)}to{opacity:1;transform:scale(1)}}
+  /* هيكل تحميل (skeleton): بيظهر بدل نصوص «لسه مفيش» والأصفار لحد ما
+     بيانات Supabase توصل فعلًا — مفيش حالة فارغة بتتكتب أثناء التحميل */
+  @keyframes skel-pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .skel{background:var(--surface2);border-radius:14px;animation:skel-pulse 1.3s ease-in-out infinite}
   .logo-wrap{position:relative;display:inline-flex}
   .logo-ic{animation:logo-breathe 2.2s ease-in-out infinite;background:#fff;border-radius:20px;width:60px;height:60px;display:flex;align-items:center;justify-content:center;font-size:30px;box-shadow:0 6px 16px rgba(0,0,0,.2)}
   .logo-ring{position:absolute;inset:0;border-radius:20px;border:3px solid rgba(255,255,255,.55);animation:logo-ring 2.2s ease-out infinite}
@@ -65,7 +69,7 @@
   .subj .thumb{width:100%;height:104px;object-fit:cover;display:block}
   .subj .body{padding:12px 14px 14px}
   .subj .open-pill{display:inline-block;margin-top:10px;background:var(--accent);color:#fff;border-radius:999px;padding:5px 14px;font-size:12px;font-weight:800}
-  @media (prefers-reduced-motion:reduce){.logo-ic,.logo-ring,.float,.fade-up,.hero-img{animation:none!important}}
+  @media (prefers-reduced-motion:reduce){.logo-ic,.logo-ring,.float,.fade-up,.hero-img,.skel{animation:none!important}}
 </style>
 </head>
 <body>
@@ -183,6 +187,10 @@ let adminUnlocked=false;     // بوابة كود الأدمن (التحقق م�
 const WRITE_SESSION_MSG="الكتابة مش مفعّلة لسه: جلسة أدمن Supabase مش شغالة. التفعيل بيتم مرة واحدة بس — نفّذ قسم 12 من ملف supabase-setup.sql في Supabase (SQL Editor)، وبعدين اقفل الأدمن وادخل بالكود من جديد، وهتشتغل الإضافة والتعديل والحذف بالكود بس.";
 let view={name:"home"};
 let liveInitDone=false, safetyTimer=null, lastAutoRefresh=0;
+/* false لحد ما أول تحميل كامل للبيانات يخلص (حي من Supabase أو احتياطي) —
+   وطول ما هي false الأقسام اللي بتستنى بيانات بتعرض هيكل تحميل (skeleton)
+   بدل نصوص الحالة الفارغة («لسه مفيش…») أو أصفار العدادات */
+let dataReady=false;
 let semConfirmPending=false;
 let announcementText="";
 let annPending=null, annConfirmPending=false, annClearPending=false;
@@ -221,42 +229,45 @@ const ordOf=i=>(typeof i.sort_order==="number"&&isFinite(i.sort_order))?i.sort_o
 const byDisplayOrder=(a,b)=>ordOf(a)-ordOf(b)||(Number(b.id||0)-Number(a.id||0));
 
 async function fetchAllLive(){
-  const [sems,subs,v,f,q]=await Promise.all([
+  /* كل الجداول بتتجاب بالتوازي في طلب واحد مجمّع (Promise.all) بدل
+     الانتظار التسلسلي جدول ورا جدول — أول عرض بييجي أسرع بكتير.
+     كل استعلام محمي لوحده: جدول ناقص أو فشل مؤقت يرجّع undefined فالأقسام
+     التانية تكمل عادي (الريكوردات/الملخصات قسم 14، الامتحانات والأسئلة
+     المجهولة قسم 10 — غياب أي جدول ما يوقفش باقي الموقع). */
+  const rows=await Promise.all([
     sb.from("semesters").select("*").order("sort_order"),
     sb.from("subjects").select("*"),
     sb.from("videos").select("*").order("id",{ascending:false}),
+    sb.from("recordings").select("*").order("id",{ascending:false}),
     sb.from("files").select("*").order("id",{ascending:false}),
-    sb.from("questions").select("*").order("id",{ascending:false})
-  ]);
-  /* جداول الريكوردات والملخصات (قسم 14 في supabase-setup.sql) — غيابها
-     قبل تنفيذ القسم ما يوقفش باقي الموقع، الأقسام بتظهر فاضية بس */
-  let recRows=[], sumRows=[];
-  try{const r=await sb.from("recordings").select("*").order("id",{ascending:false}); if(!r.error)recRows=r.data||[]}catch(e){}
-  try{const s2=await sb.from("summaries").select("*").order("id",{ascending:false}); if(!s2.error)sumRows=s2.data||[]}catch(e){}
-  if(sems.data&&sems.data.length)SEMESTERS=sems.data.map(s=>({slug:s.slug,ar:s.name_ar,en:s.name_en||"",term:s.term_label||""}));
-  if(subs.data&&subs.data.length){
+    sb.from("summaries").select("*").order("id",{ascending:false}),
+    sb.from("questions").select("*").order("id",{ascending:false}),
+    sb.from("site_settings").select("*").eq("key","announcement").maybeSingle(),
+    sb.from("exams").select("*").order("exam_date"),
+    sb.from("anon_questions").select("*").order("id",{ascending:false}),
+    sb.from("anon_replies").select("*").order("id")
+  ].map(p=>Promise.resolve(p).then(r=>r&&!r.error?r.data:undefined).catch(()=>undefined)));
+  const [sems,subs,v,rec,f,sum,q,st,ex,aq,ar]=rows;
+  if(sems&&sems.length)SEMESTERS=sems.map(s=>({slug:s.slug,ar:s.name_ar,en:s.name_en||"",term:s.term_label||""}));
+  if(subs&&subs.length){
     subjectSlugById={}; subjectIdBySlug={};
-    for(const s of subs.data){if(s.id&&s.slug){subjectSlugById[s.id]=s.slug;subjectIdBySlug[s.slug]=s.id}}
-    SUBJECTS=subs.data.map(s=>({slug:s.slug,en:s.name_en,ar:s.name_ar,icon:FALLBACK_ICONS[s.slug]||"📘",semester:"semester-1",color:"#0F766E"}));
+    for(const s of subs){if(s.id&&s.slug){subjectSlugById[s.id]=s.slug;subjectIdBySlug[s.slug]=s.id}}
+    SUBJECTS=subs.map(s=>({slug:s.slug,en:s.name_en,ar:s.name_ar,icon:FALLBACK_ICONS[s.slug]||"📘",semester:"semester-1",color:"#0F766E"}));
   }
   published=[
-    ...(v.data||[]).map(r=>unify("video",r)),
-    ...recRows.map(r=>unify("recording",r)),
-    ...(f.data||[]).map(r=>unify("file",r)),
-    ...sumRows.map(r=>unify("summary",r)),
-    ...(q.data||[]).map(r=>unify("question",r))
+    ...(v||[]).map(r=>unify("video",r)),
+    ...(rec||[]).map(r=>unify("recording",r)),
+    ...(f||[]).map(r=>unify("file",r)),
+    ...(sum||[]).map(r=>unify("summary",r)),
+    ...(q||[]).map(r=>unify("question",r))
   ].sort(byDisplayOrder);
-  try{const st=await sb.from("site_settings").select("*").eq("key","announcement").maybeSingle();
-    if(!st.error)announcementText=(st.data&&st.data.value)||"";}catch(e){}
-  /* جدول الامتحانات (قسم 10 في supabase-setup.sql) — غيابه ما يوقفش باقي الموقع */
-  try{const ex=await sb.from("exams").select("*").order("exam_date");
-    if(!ex.error)examsList=(ex.data||[]).map(r=>({id:r.id,title:r.title,exam_type:r.exam_type||"other",subject_slug:r.subject_slug||null,exam_date:r.exam_date,note:r.note||null}));}catch(e){}
+  if(st!==undefined)announcementText=(st&&st.value)||"";
+  /* جدول الامتحانات (قسم 10 في supabase-setup.sql) */
+  if(ex)examsList=ex.map(r=>({id:r.id,title:r.title,exam_type:r.exam_type||"other",subject_slug:r.subject_slug||null,exam_date:r.exam_date,note:r.note||null}));
   /* الأسئلة المجهولة (قسم 10): القراءة العامة للمنشور بس حسب سياسات RLS */
-  try{const aq=await sb.from("anon_questions").select("*").order("id",{ascending:false});
-    const ar=await sb.from("anon_replies").select("*").order("id");
-    if(!aq.error){const reps=ar.error?[]:(ar.data||[]);
-      anonAll=(aq.data||[]).map(q=>({id:q.id,question_text:q.question_text,answer_text:q.answer_text||null,status:q.status,created_at:q.created_at,replies:reps.filter(r=>r.question_id===q.id).map(r=>({id:r.id,reply_text:r.reply_text,created_at:r.created_at}))}));}
-  }catch(e){}
+  if(aq){const reps=ar||[];
+    anonAll=aq.map(q=>({id:q.id,question_text:q.question_text,answer_text:q.answer_text||null,status:q.status,created_at:q.created_at,replies:reps.filter(r=>r.question_id===q.id).map(r=>({id:r.id,reply_text:r.reply_text,created_at:r.created_at}))}));}
+  dataReady=true;
 }
 
 async function load(){
@@ -270,8 +281,12 @@ async function load(){
       s.onload=res;s.onerror=rej;document.head.appendChild(s)}).catch(()=>null);
     if(window.supabase){
       sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
-      try{await fetchAllLive()}catch(e){published=[]}
-      const {data}=await sb.auth.getSession(); session=data.session;
+      /* البيانات وجلسة الأدمن بيتحمّلوا بالتوازي — أول عرض أسرع */
+      const [,sessRes]=await Promise.all([
+        fetchAllLive().catch(()=>{published=[]}),
+        sb.auth.getSession().catch(()=>null)
+      ]);
+      session=(sessRes&&sessRes.data&&sessRes.data.session)||null;
       sb.auth.onAuthStateChange((_e,s)=>{session=s; if(view.name==="admin")render()});
       // ===== Supabase Realtime: أي INSERT/UPDATE/DELETE في الجداول التلاتة
       // بيوصل لكل الصفحات المفتوحة في ثوانٍ — من غير تحديث يدوي ولا إعادة نشر
@@ -298,6 +313,7 @@ async function load(){
   examsList=lsGet("sahli-exams",[]);
   anonAll=lsGet("sahli-anon-questions",[]);
   try{const r=await fetch("content.json",{cache:"default"}); if(r.ok){const d=await r.json(); published=Array.isArray(d)?d:(d.items||[]);}}catch(e){published=[]}
+  dataReady=true;
   render();
 }
 /* ---------------- تحديث تلقائي أول ما النت يرجع ----------------
@@ -359,6 +375,10 @@ function cairoOffsetMs(at){const parts=new Intl.DateTimeFormat("en-US",{timeZone
 function cairoLocalToIso(local){const dp=(local||"").split("T"),datePart=dp[0]||"",timePart=dp[1]||"00:00";const dd=datePart.split("-").map(Number),tt=timePart.split(":").map(Number);const y=dd[0]||1970,mo=dd[1]||1,d=dd[2]||1,h=tt[0]||0,mi=tt[1]||0;const wallAsUTC=Date.UTC(y,mo-1,d,h,mi);let instant=wallAsUTC;for(let i=0;i<3;i++){const next=wallAsUTC-cairoOffsetMs(new Date(instant));if(next===instant)break;instant=next}return new Date(instant).toISOString()}
 const EXAM_LABELS={midterm:"📝 ميدتيرم",practical:"🧪 عملي",final:"🎓 فاينال",other:"📌 امتحان"};
 function examsHtml(){
+  if(!dataReady)return `<section style="margin-top:20px"><h2 style="margin:0 0 4px">⏳ الامتحانات الجاية</h2>
+  <div class="skel" style="height:118px;margin-top:10px" role="status" aria-label="جاري تحميل الامتحانات"></div>
+  <div class="skel" style="height:64px;margin-top:8px"></div>
+  <div class="skel" style="height:64px;margin-top:8px"></div></section>`;
   const now=Date.now();
   const up=examsList.filter(e=>new Date(e.exam_date).getTime()>now);
   const past=examsList.filter(e=>new Date(e.exam_date).getTime()<=now);
@@ -378,6 +398,88 @@ function cdTick(){
   box.innerHTML=[[d,"يوم"],[h,"ساعة"],[m,"دقيقة"],[s,"ثانية"]].map(([v,l])=>`<span style="display:inline-block;background:rgba(255,255,255,.15);border-radius:14px;padding:8px 0;width:23%;margin-inline-end:2%;text-align:center"><b style="display:block;font-size:22px" dir="ltr">${v}</b><span style="font-size:11px;opacity:.85">${l}</span></span>`).join("");
 }
 setInterval(cdTick,1000);
+/* ---------------- خطة المذاكرة المقترحة ----------------
+   خطة يوم بيوم بتتبني لحظيًا من جدول الامتحانات الحي وعدد عناصر كل
+   مادة الفعلي: كل مادة بتاخد أيام مذاكرة فعلية (يومين على الأقل)
+   بنطاق عناصر محدد قبل امتحانها، ولو الفترة اللي قبل امتحانها قصيرة
+   عشان امتحان المادة اللي قبلها قريب، أيام مذاكرتها بتتسحب بدري في
+   الأيام الفاضية اللي قبلها. اليوم اللي قبل الامتحان مراجعة سريعة،
+   وصف مستقل ليوم الامتحان نفسه.
+   كل الأيام بتتحسب بتوقيت القاهرة زي العدّاد بالظبط. */
+function cairoDayMs(d){const parts=new Intl.DateTimeFormat("en-US",{timeZone:EXAM_TZ,year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(d);const g=t=>Number((parts.find(p=>p.type===t)||{}).value||0);return Date.UTC(g("year"),g("month")-1,g("day"))}
+function studyPlanHtml(){
+  if(!dataReady)return `<section style="margin-top:20px"><h2 style="margin:0 0 4px">🗓️ خطة المذاكرة المقترحة</h2>
+  <div class="skel" style="height:150px;margin-top:10px" role="status" aria-label="جاري تجهيز خطة المذاكرة"></div></section>`;
+  const DAY=86400000, todayMs=cairoDayMs(new Date());
+  const subs=allSubjects();
+  const planned=examsList.filter(e=>e.subject_slug&&subs.some(s=>s.slug===e.subject_slug)&&cairoDayMs(new Date(e.exam_date))>=todayMs);
+  if(!planned.length)return "";
+  const fmtDay=ms=>new Date(ms).toLocaleDateString("ar-EG",{timeZone:"UTC",weekday:"long",day:"numeric",month:"long"});
+  const fmtExam=iso=>new Date(iso).toLocaleString("ar-EG",{timeZone:EXAM_TZ,weekday:"long",day:"numeric",month:"long",hour:"numeric",minute:"2-digit"});
+  planned.sort((a,b)=>cairoDayMs(new Date(a.exam_date))-cairoDayMs(new Date(b.exam_date)));
+  // أيام الامتحانات محجوزة: مفيش مذاكرة لأي مادة في يوم امتحان
+  const examDays=new Set(planned.map(e=>cairoDayMs(new Date(e.exam_date))));
+  // حِمل كل يوم: كام مادة بتتذاكر فيه (حدّ ناعم: مادتين في اليوم)
+  const dayLoad=new Map();
+  const segs=planned.map((exam)=>{
+    const s=subs.find(x=>x.slug===exam.subject_slug);
+    const c=counts(s.slug), total=c.v+c.r+c.f+c.s+c.q;
+    const examDayMs=cairoDayMs(new Date(exam.exam_date));
+    // عدد أيام المذاكرة المطلوب: على الأقل يومين لكل مادة، وبيزيد مع حجم المحتوى
+    const desired=total===0?2:Math.min(10,Math.max(2,Math.ceil(total/6)));
+    // الأيام المرشحة: من النهاردة لحد قبل يوم المراجعة، من الأقرب للامتحان للأبعد —
+    // كده المادة اللي امتحانها قريب من اللي قبله بتسحب أيام مذاكرتها بدري
+    // في الأيام الفاضية اللي قبلها بدل ما تضيع من غير مذاكرة
+    const candidates=[];
+    for(let d=examDayMs-2*DAY;d>=todayMs;d-=DAY){ if(!examDays.has(d))candidates.push(d); }
+    const picked=[];
+    for(const d of candidates){ if(picked.length>=desired)break; if((dayLoad.get(d)||0)<2)picked.push(d); }
+    // ضمان: كل مادة تاخد أيامها المطلوبة حتى لو اليوم بقى فيه مادتين خلاص
+    for(const d of candidates){ if(picked.length>=desired)break; if(!picked.includes(d))picked.push(d); }
+    for(const d of picked)dayLoad.set(d,(dayLoad.get(d)||0)+1);
+    picked.sort((a,b)=>a-b);
+    const n=picked.length; let covered=0;
+    const days=picked.map((d,idx)=>{
+      const share=n>0?Math.floor(total/n)+(idx<total%n?1:0):0;
+      const from=share>0?covered+1:0; covered+=share;
+      return {dayMs:d,kind:"study",count:share,from,to:covered};
+    });
+    if(examDayMs-DAY>=todayMs)days.push({dayMs:examDayMs-DAY,kind:"revision",count:0,from:0,to:0});
+    days.push({dayMs:examDayMs,kind:"exam",count:0,from:0,to:0});
+    const breakdown=[["🎬",c.v,"فيديو"],["🎙️",c.r,"ريكورد"],["📁",c.f,"ملف"],["📝",c.s,"ملخص"],["❓",c.q,"سؤال"]].filter(x=>x[1]>0).map(x=>x[0]+" "+x[1]+" "+x[2]).join(" · ");
+    const dayRow=d=>{
+      const isPast=d.dayMs<todayMs, isToday=d.dayMs===todayMs;
+      const titlePlain=d.kind==="exam"?("🎓 يوم الامتحان — "+exam.title)
+        :d.kind==="revision"?("🔁 مراجعة سريعة — "+s.ar)
+        :d.count>0?("ذاكر "+s.ar+" — 🎯 "+d.count+" عنصر")
+        :total>0?("راجع "+s.ar+" — اللي فات وحل أسئلة")
+        :("ذاكر "+s.ar+" من مصادرك");
+      const title=esc(titlePlain);
+      const sub=d.kind==="exam"?fmtExam(exam.exam_date)
+        :d.kind==="revision"?"عدّي على أهم النقاط والملخصات والأسئلة — مراجعة خفيفة قبل الامتحان"
+        :d.count>0?("العناصر من "+d.from+" لـ "+d.to+" من أصل "+total+" عنصر في المادة")
+        :total>0?"مفيش عناصر جديدة في خطة النهاردة — يوم خفيف للمراجعة"
+        :"لسه مفيش عناصر مضافة للمادة في المنصة — ذاكر من الكتاب ومصادرك";
+      const examStyle=d.kind==="exam"?"background:var(--accent);color:#fff;border:0;":"";
+      return `<button class="card" style="width:100%;text-align:right;display:block;margin-top:8px;${isPast?"opacity:.6;":""}${examStyle||""}${isToday&&d.kind!=="exam"?"border:2px solid var(--accent);":""}" onclick="openSubject('${s.slug}')" aria-label="${esc(titlePlain)} — ${esc(fmtDay(d.dayMs))}${isPast?" (عدّى)":isToday?" (النهاردة)":""} — افتح مادة ${esc(s.ar)}">
+        <span style="font-size:12px;font-weight:900;color:${d.kind==="exam"?"rgba(255,255,255,.85)":"var(--accent)"}">${esc(fmtDay(d.dayMs))}</span>
+        ${isToday?` <span class="pill" style="${d.kind==="exam"?"background:rgba(255,255,255,.2);color:#fff":"background:var(--accent);color:#fff"}">النهاردة</span>`:""}
+        ${isPast?` <span class="pill">✓ عدّى</span>`:""}
+        <div style="font-weight:900;margin-top:2px">${title}</div>
+        <div class="meta" style="${d.kind==="exam"?"color:rgba(255,255,255,.85)":""}">${esc(sub)}</div>
+      </button>`;
+    };
+    return `<div class="card">
+      <div class="row"><span style="font-size:20px">${s.icon}</span><strong style="font-size:16px">${esc(s.ar)}</strong> <span class="pill">${EXAM_LABELS[exam.exam_type]||"📌 امتحان"}</span></div>
+      <div class="meta" style="margin-top:2px">الامتحان: ${fmtExam(exam.exam_date)}</div>
+      <div class="meta">${total>0?("محتوى المادة في المنصة: "+total+" عنصر — "+breakdown):"لسه مفيش محتوى مضاف للمادة دي في المنصة"}</div>
+      ${days.map(dayRow).join("")}
+    </div>`;
+  });
+  return `<section style="margin-top:20px"><h2 style="margin:0 0 4px">🗓️ خطة المذاكرة المقترحة</h2>
+  <p class="meta" style="line-height:1.9">خطة يوم بيوم من النهاردة لحد آخر امتحان، متقسمة حسب عدد عناصر كل مادة الموجودة في المنصة فعلًا — كل مادة ليها أيام مذاكرة قبل امتحانها، ولو امتحانها قريب من اللي قبله بنبدأ مذاكرتها بدري في الأيام الفاضية، واليوم اللي قبل كل امتحان مراجعة سريعة. اضغط على أي يوم عشان تفتح المادة وتبدأ.</p>
+  <div style="display:flex;flex-direction:column;gap:12px;margin-top:6px">${segs.join("")}</div></section>`;
+}
 /* ---------------- زرار ؟ — مميزات المنصة ---------------- */
 const PLATFORM_FEATURES=[
  ["📚","المحتوى متقسم ومرتب بالسيمسترات والمواد (فيديوهات · ريكوردات · ملفات · ملخصات · أسئلة) وكل قسم متقسم محاضرات وسكاشن عملي — بدل ٥٠٠ رسالة متلخبطة على تليجرام تدوّر فيها بالساعات"],
@@ -385,6 +487,7 @@ const PLATFORM_FEATURES=[
  ["▶️","الفيديوهات والملفات بتتفتح وبتشتغل جوّه الموقع نفسه — من غير ما تخرج ولا تضيع في روابط"],
  ["✅","متتبع مذاكرة: علّم بعلامة صح على كل محاضرة وملف ذاكرته، وشريط بيقولك خلصت كام % من كل مادة"],
  ["⏳","عدّاد تنازلي وجدول كامل للامتحانات الجاية (ميدتيرم · عملي · فاينال) عشان تبقى عارف فاضل قد إيه"],
+ ["🗓️","خطة مذاكرة مقترحة يوم بيوم لحد آخر امتحان، متقسمة على عدد عناصر كل مادة في المنصة — واليوم اللي قبل كل امتحان مراجعة سريعة"],
  ["⏰","تذكيرات مذاكرة تنبّهك في وقتها، وعدّاد بيحسب وقت مذاكرتك كل يوم وسلسلة أيام التزامك"],
  ["🔔","إشعارات موبايل توصلك بأي محاضرة جديدة أو إعلان مهم حتى والموقع مقفل — فعّلها من كارت «إشعارات الموبايل» في الرئيسية (وعلى آيفون لازم تثبيت الموقع على الشاشة الرئيسية الأول)"],
  ["🕶️","اسأل أي سؤال مجهول من غير اسم ومن غير إحراج — الأدمن يجاوب وينشره في الأسئلة المتكررة عشان الكل يستفيد"],
@@ -409,7 +512,7 @@ function anonHtml(){
   <p id="anon-err" style="color:#DC2626;font-weight:700"></p>
   <button class="btn" style="width:100%" onclick="askAnon()">🕶️ ابعت السؤال مجهول</button></div>
   <h3 style="margin:18px 0 2px">❓ الأسئلة المتكررة</h3>
-  ${pubs.length===0?`<div class="empty">لسه مفيش أسئلة منشورة — كن أول واحد يسأل من الصندوق اللي فوق 👆</div>`:pubs.map(q=>`<article class="card" style="margin-top:10px"><strong>🕶️ ${esc(q.question_text)}</strong>
+  ${pubs.length===0?(dataReady?`<div class="empty">لسه مفيش أسئلة منشورة — كن أول واحد يسأل من الصندوق اللي فوق 👆</div>`:`<div class="skel" style="height:84px;margin-top:10px" role="status" aria-label="جاري تحميل الأسئلة المتكررة"></div>`):pubs.map(q=>`<article class="card" style="margin-top:10px"><strong>🕶️ ${esc(q.question_text)}</strong>
     <div style="background:var(--surface2);border-radius:14px;padding:10px 12px;margin-top:8px"><div style="font-size:12px;font-weight:900;color:var(--accent)">إجابة الأدمن</div><div style="white-space:pre-wrap;line-height:1.9">${esc(q.answer_text||"")}</div></div>
     ${(q.replies||[]).map(r=>`<div style="background:var(--surface2);border-radius:12px;padding:8px 10px;margin-top:6px"><b style="color:var(--dim)">🕶️ رد مجهول: </b>${esc(r.reply_text)}</div>`).join("")}
     <div class="row" style="margin-top:8px"><input id="anon-reply-${q.id}" maxlength="1000" placeholder="ردّ من غير اسمك..." style="flex:1"><button class="btn ghost" onclick="replyAnon('${q.id}')">ردّ 🕶️</button></div></article>`).join("")}
@@ -444,7 +547,7 @@ function render(){
   if(view.name==="admin"){renderAdmin();studyChipRender();return}
   if(view.name==="reminders"){renderReminders();studyChipRender();return}
   if(view.name==="semester"){renderSemester();studyChipRender();return}
-  logVisit("الرئيسية");
+  if(dataReady)logVisit("الرئيسية");
   const sems=allSemesters();
   $app.innerHTML=`
    ${bannerHtml()}
@@ -467,12 +570,13 @@ function render(){
    </section>
    ${pushCardHtml()}
    ${examsHtml()}
+   ${studyPlanHtml()}
    <h2 style="margin:20px 0 4px">📚 اختر السيمستر</h2>
    <section style="display:flex;flex-direction:column;gap:12px;margin-top:10px">${sems.map((sem,idx)=>{const subs=allSubjects().filter(s=>s.semester===sem.slug);const total=subs.reduce((a,s)=>a+bySubject(s.slug).length,0);return `
      <button class="sem-btn fade-up" style="animation-delay:${idx*90}ms" onclick="openSemester('${sem.slug}')" aria-label="فتح ${esc(sem.ar)}">
        <span class="ic float">📚</span>
        <span style="flex:1;min-width:0"><h3>${esc(sem.ar)}</h3>
-       <div class="meta2">${esc(sem.term||"")} · ${subs.length} مادة · ${total} عنصر محتوى</div>
+       <div class="meta2">${esc(sem.term||"")} · ${subs.length} مادة · ${dataReady?(total+" عنصر محتوى"):"جاري تحميل المحتوى…"}</div>
        <div class="meta2" style="line-height:1.7;overflow-wrap:break-word">${subs.map(s=>esc(s.ar)).join(" · ")||"لسه مفيش مواد"}</div></span>
        <span style="background:var(--accent);color:#fff;border-radius:50%;width:42px;height:42px;display:flex;align-items:center;justify-content:center;font-weight:900;flex-shrink:0">←</span>
      </button>`}).join("")}
@@ -486,7 +590,7 @@ function bannerHtml(){return announcementText?`<div class="card" role="region" a
 function openSemester(slug){view={name:"semester",slug};render()}
 function renderSemester(){
   const sem=allSemesters().find(s=>s.slug===view.slug)||allSemesters()[0];
-  logVisit("سيمستر: "+sem.slug);
+  if(dataReady)logVisit("سيمستر: "+sem.slug);
   const subs=allSubjects().filter(s=>s.semester===sem.slug);
   $app.innerHTML=`
    ${bannerHtml()}
@@ -501,7 +605,7 @@ function renderSemester(){
        <span class="body" style="display:block;text-align:right">
        <div class="ic">${s.icon}</div><h3>${esc(s.ar)}</h3>
        <div class="en2" dir="ltr" style="text-align:right">${esc(s.en)}</div>
-       <div class="counts">🎬 ${c.v} · 🎙️ ${c.r} · 📁 ${c.f} · 📝 ${c.s} · ❓ ${c.q}${(c.v+c.r+c.f+c.s+c.q)===0?" · لسه مفيش محتوى — قريبًا":""}</div>
+       <div class="counts">${dataReady?(`🎬 ${c.v} · 🎙️ ${c.r} · 📁 ${c.f} · 📝 ${c.s} · ❓ ${c.q}${(c.v+c.r+c.f+c.s+c.q)===0?" · لسه مفيش محتوى — قريبًا":""}`):"جاري تحميل المحتوى…"}</div>
        ${subjectProgressHtml(s.slug)}
        <span class="open-pill">افتح المادة ←</span></span>
      </button>`}).join("")}
@@ -709,7 +813,7 @@ function questionGroupsHtml(items){
 }
 function renderSubject(){
   const s=subj(view.slug),c=counts(s.slug);
-  logVisit("مادة: "+s.slug);
+  if(dataReady)logVisit("مادة: "+s.slug);
   const img=SUBJECT_IMAGES[s.slug];
   const all=bySubject(s.slug).filter(i=>i.kind===tab);
   const items=all.slice(0,visible), total=all.length;
@@ -721,10 +825,10 @@ function renderSubject(){
    <header class="card" style="margin-top:12px;padding:0;overflow:hidden">${img?`<img src="${img}" alt="رسم توضيحي لمادة ${esc(s.ar)}" style="width:100%;height:130px;object-fit:cover;display:block">`:""}
      <div style="padding:14px"><div style="font-size:32px">${s.icon}</div>
      <h2 style="margin:6px 0 2px">${esc(s.ar)}</h2><div class="meta" dir="ltr" style="text-align:right">${esc(s.en)}</div>
-     <div class="meta">${c.v} فيديو · ${c.r} ريكورد · ${c.f} ملف · ${c.s} ملخص · ${c.q} سؤال</div></div></header>
+     <div class="meta">${dataReady?(`${c.v} فيديو · ${c.r} ريكورد · ${c.f} ملف · ${c.s} ملخص · ${c.q} سؤال`):"جاري تحميل المحتوى…"}</div></div></header>
    ${progressBarHtml(bySubject(s.slug))}
-   <nav class="tabs">${Object.keys(labels).map(k=>`<button class="${tab===k?"on":""}" onclick="setTab('${k}')">${labels[k]} (${tabCount[k]})</button>`).join("")}</nav>
-   ${total===0?`<div class="empty">لسه مفيش محتوى في القسم ده — بيتم إضافته من صفحة الأدمن وبيظهر هنا لحظيًا.</div>`:
+   <nav class="tabs">${Object.keys(labels).map(k=>`<button class="${tab===k?"on":""}" onclick="setTab('${k}')">${labels[k]}${dataReady?` (${tabCount[k]})`:""}</button>`).join("")}</nav>
+   ${total===0?(dataReady?`<div class="empty">لسه مفيش محتوى في القسم ده — بيتم إضافته من صفحة الأدمن وبيظهر هنا لحظيًا.</div>`:`<div class="skel" style="height:96px;margin-top:12px" role="status" aria-label="جاري تحميل محتوى القسم"></div><div class="skel" style="height:96px;margin-top:8px"></div>`):
      (tab==="file"||tab==="recording"||tab==="summary")?fileGroupsHtml(items):tab==="question"?questionGroupsHtml(items):items.map((i,idx)=>cardHtml(i,idx)).join("")}
    ${visible<total?`<p style="text-align:center"><button class="btn ghost" onclick="more()">عرض المزيد (${total-visible} متبقي)</button></p>`:""}
    ${suggestHtml(s)}
@@ -1756,6 +1860,10 @@ if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
   });
 }
 studyChipRender();
+/* رسم فوري لهيكل الصفحة مع هياكل تحميل (skeleton) في الأقسام اللي بتستنى
+   بيانات — أول عرض بيظهر على طول بدل صفحة فاضية أو حالات «لسه مفيش»
+   وأصفار، و load() بترسم من جديد بالبيانات الحقيقية أول ما توصل */
+render();
 load();
 pushDetect();
 </script>
